@@ -1,9 +1,4 @@
----
-title: "Gravitino Glossary"
-date: 2023-11-28
-license: "Copyright 2023 Datastrato Pvt Ltd.
-This software is licensed under the Apache License version 2."
----
+
 
 ## Apache Hadoop
 
