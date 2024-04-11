@@ -6,9 +6,12 @@ package com.datastrato.gravitino.server.web.rest;
 
 import com.codahale.metrics.annotation.ResponseMetered;
 import com.codahale.metrics.annotation.Timed;
+import com.datastrato.gravitino.GravitinoEnv;
 import com.datastrato.gravitino.MetalakeChange;
 import com.datastrato.gravitino.NameIdentifier;
 import com.datastrato.gravitino.Namespace;
+import com.datastrato.gravitino.authorization.AccessControlManager;
+import com.datastrato.gravitino.authorization.AuthorizationUtils;
 import com.datastrato.gravitino.dto.MetalakeDTO;
 import com.datastrato.gravitino.dto.requests.MetalakeCreateRequest;
 import com.datastrato.gravitino.dto.requests.MetalakeUpdateRequest;
@@ -17,12 +20,14 @@ import com.datastrato.gravitino.dto.responses.DropResponse;
 import com.datastrato.gravitino.dto.responses.MetalakeListResponse;
 import com.datastrato.gravitino.dto.responses.MetalakeResponse;
 import com.datastrato.gravitino.dto.util.DTOConverters;
+import com.datastrato.gravitino.exceptions.ForbiddenException;
 import com.datastrato.gravitino.lock.LockType;
 import com.datastrato.gravitino.lock.TreeLockUtils;
 import com.datastrato.gravitino.meta.BaseMetalake;
 import com.datastrato.gravitino.metalake.MetalakeManager;
 import com.datastrato.gravitino.metrics.MetricNames;
 import com.datastrato.gravitino.server.web.Utils;
+import com.datastrato.gravitino.utils.PrincipalUtils;
 import java.util.Arrays;
 import javax.inject.Inject;
 import javax.servlet.http.HttpServletRequest;
@@ -40,6 +45,12 @@ import javax.ws.rs.core.Response;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/**
+ * If Gravitino enables authorization, MetalakeOperations will follow the rules. First, only
+ * metalake admins can create the metalake or list metalakes. Second, only metalake admins can alter
+ * or drop the metalake which he created. Third, all the users of the metalake can load the
+ * metalake.
+ */
 @Path("/metalakes")
 @Consumes(MediaType.APPLICATION_JSON)
 @Produces(MediaType.APPLICATION_JSON)
@@ -48,12 +59,14 @@ public class MetalakeOperations {
   private static final Logger LOG = LoggerFactory.getLogger(MetalakeOperations.class);
 
   private final MetalakeManager manager;
+  private final AccessControlManager accessControlManager;
 
   @Context private HttpServletRequest httpRequest;
 
   @Inject
   public MetalakeOperations(MetalakeManager manager) {
     this.manager = manager;
+    this.accessControlManager = GravitinoEnv.getInstance().accessControlManager();
   }
 
   @GET
@@ -66,7 +79,26 @@ public class MetalakeOperations {
           httpRequest,
           () -> {
             BaseMetalake[] metalakes =
-                TreeLockUtils.doWithRootTreeLock(LockType.READ, manager::listMetalakes);
+                TreeLockUtils.doWithRootTreeLock(
+                    LockType.READ,
+                    () -> {
+                      if (authorizationDisabled()) {
+                        return manager.listMetalakes();
+
+                      } else {
+                        return AuthorizationUtils.doWithLock(
+                            () -> {
+                              String currentUser = PrincipalUtils.getCurrentPrincipal().getName();
+                              if (isMetalakeAdmin(currentUser)) {
+                                return manager.listMetalakes();
+                              } else {
+                                throw new ForbiddenException(
+                                    "%s is not a metalake admin, only metalake admins can create metalake",
+                                    currentUser);
+                              }
+                            });
+                      }
+                    });
             MetalakeDTO[] metalakeDTOS =
                 Arrays.stream(metalakes).map(DTOConverters::toDTO).toArray(MetalakeDTO[]::new);
             return Utils.ok(new MetalakeListResponse(metalakeDTOS));
@@ -92,9 +124,26 @@ public class MetalakeOperations {
             BaseMetalake metalake =
                 TreeLockUtils.doWithRootTreeLock(
                     LockType.WRITE,
-                    () ->
-                        manager.createMetalake(
-                            ident, request.getComment(), request.getProperties()));
+                    () -> {
+                      if (authorizationDisabled()) {
+                        return manager.createMetalake(
+                            ident, request.getComment(), request.getProperties());
+
+                      } else {
+                        return AuthorizationUtils.doWithLock(
+                            () -> {
+                              String currentUser = PrincipalUtils.getCurrentPrincipal().getName();
+                              if (isMetalakeAdmin(currentUser)) {
+                                return manager.createMetalake(
+                                    ident, request.getComment(), request.getProperties());
+                              } else {
+                                throw new ForbiddenException(
+                                    "%s is not a metalake amin, only metalake admins can create metalake",
+                                    currentUser);
+                              }
+                            });
+                      }
+                    });
             return Utils.ok(new MetalakeResponse(DTOConverters.toDTO(metalake)));
           });
 
@@ -116,7 +165,28 @@ public class MetalakeOperations {
             NameIdentifier identifier = NameIdentifier.ofMetalake(metalakeName);
             BaseMetalake metalake =
                 TreeLockUtils.doWithTreeLock(
-                    identifier, LockType.READ, () -> manager.loadMetalake(identifier));
+                    identifier,
+                    LockType.READ,
+                    () -> {
+                      if (authorizationDisabled()) {
+                        return manager.loadMetalake(identifier);
+
+                      } else {
+                        return AuthorizationUtils.doWithLock(
+                            () -> {
+                              String currentUser = PrincipalUtils.getCurrentPrincipal().getName();
+                              if (isCreator(currentUser, identifier)
+                                  || isUserInMetalake(currentUser, metalakeName)) {
+                                return manager.loadMetalake(identifier);
+
+                              } else {
+                                throw new ForbiddenException(
+                                    "%s is not in the metalake, he can't load the metalake",
+                                    currentUser);
+                              }
+                            });
+                      }
+                    });
             return Utils.ok(new MetalakeResponse(DTOConverters.toDTO(metalake)));
           });
 
@@ -144,7 +214,18 @@ public class MetalakeOperations {
                     .toArray(MetalakeChange[]::new);
             BaseMetalake updatedMetalake =
                 TreeLockUtils.doWithRootTreeLock(
-                    LockType.WRITE, () -> manager.alterMetalake(identifier, changes));
+                    LockType.WRITE,
+                    () -> {
+                      String currentUser = PrincipalUtils.getCurrentPrincipal().getName();
+                      if (authorizationDisabled() || isCreator(currentUser, identifier)) {
+                        return manager.alterMetalake(identifier, changes);
+
+                      } else {
+                        throw new ForbiddenException(
+                            "%s is not the creator of metalake, only the creator can alter the metalake",
+                            currentUser);
+                      }
+                    });
             return Utils.ok(new MetalakeResponse(DTOConverters.toDTO(updatedMetalake)));
           });
 
@@ -166,7 +247,18 @@ public class MetalakeOperations {
             NameIdentifier identifier = NameIdentifier.ofMetalake(metalakeName);
             boolean dropped =
                 TreeLockUtils.doWithRootTreeLock(
-                    LockType.WRITE, () -> manager.dropMetalake(identifier));
+                    LockType.WRITE,
+                    () -> {
+                      String currentUser = PrincipalUtils.getCurrentPrincipal().getName();
+                      if (authorizationDisabled() || isCreator(currentUser, identifier)) {
+                        return manager.dropMetalake(identifier);
+
+                      } else {
+                        throw new ForbiddenException(
+                            "%s is not the creator of the metalake, only the creator can drop the metalake",
+                            currentUser);
+                      }
+                    });
             if (!dropped) {
               LOG.warn("Failed to drop metalake by name {}", metalakeName);
             }
@@ -177,5 +269,21 @@ public class MetalakeOperations {
     } catch (Exception e) {
       return ExceptionHandlers.handleMetalakeException(OperationType.DROP, metalakeName, e);
     }
+  }
+
+  private boolean authorizationDisabled() {
+    return accessControlManager == null;
+  }
+
+  private boolean isCreator(String currentUser, NameIdentifier identifier) {
+    return currentUser.equals(manager.loadMetalake(identifier).auditInfo().creator());
+  }
+
+  private boolean isMetalakeAdmin(String currentUser) {
+    return accessControlManager.isMetalakeAdmin(currentUser);
+  }
+
+  private boolean isUserInMetalake(String currentUser, String metalake) {
+    return accessControlManager.isUserInMetalake(currentUser, metalake);
   }
 }
