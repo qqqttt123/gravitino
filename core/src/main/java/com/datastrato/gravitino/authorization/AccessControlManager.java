@@ -5,10 +5,11 @@
 package com.datastrato.gravitino.authorization;
 
 import com.datastrato.gravitino.Config;
+import com.datastrato.gravitino.Configs;
 import com.datastrato.gravitino.Entity;
 import com.datastrato.gravitino.EntityStore;
-import com.datastrato.gravitino.exceptions.ForbiddenException;
 import com.datastrato.gravitino.NameIdentifier;
+import com.datastrato.gravitino.exceptions.ForbiddenException;
 import com.datastrato.gravitino.exceptions.GroupAlreadyExistsException;
 import com.datastrato.gravitino.exceptions.NoSuchGroupException;
 import com.datastrato.gravitino.exceptions.NoSuchRoleException;
@@ -17,8 +18,12 @@ import com.datastrato.gravitino.exceptions.RoleAlreadyExistsException;
 import com.datastrato.gravitino.exceptions.UserAlreadyExistsException;
 import com.datastrato.gravitino.storage.IdGenerator;
 import com.datastrato.gravitino.utils.PrincipalUtils;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * AccessControlManager is used for manage users, roles, admin, grant information, this class is an
@@ -27,16 +32,39 @@ import java.util.Map;
  */
 public class AccessControlManager {
 
+  private static final Logger LOG = LoggerFactory.getLogger(AccessControlManager.class);
+
   private final UserGroupManager userGroupManager;
   private final AdminManager adminManager;
   private final RoleManager roleManager;
   private final GrantManager grantManager;
+  private final GroupMappingServiceProvider groupMappingServiceProvider;
 
   public AccessControlManager(EntityStore store, IdGenerator idGenerator, Config config) {
     this.userGroupManager = new UserGroupManager(store, idGenerator);
     this.adminManager = new AdminManager(store, idGenerator, config);
     this.roleManager = new RoleManager(store, idGenerator);
     this.grantManager = new GrantManager(store);
+
+    String userGroupsMappingClass = config.get(Configs.USER_GROUP_MAPPING);
+    if (userGroupsMappingClass != null) {
+      try {
+        groupMappingServiceProvider =
+            (GroupMappingServiceProvider)
+                Class.forName(userGroupsMappingClass).getDeclaredConstructor().newInstance();
+      } catch (Exception e) {
+        LOG.error(
+            "Failed to create and initialize group mapping service provider by name {}.",
+            userGroupsMappingClass,
+            e);
+        throw new RuntimeException(
+            "Failed to create and initialize group mapping service provider: "
+                + userGroupsMappingClass,
+            e);
+      }
+    } else {
+      groupMappingServiceProvider = null;
+    }
   }
 
   /**
@@ -217,12 +245,7 @@ public class AccessControlManager {
       List<Privilege> privileges)
       throws RoleAlreadyExistsException {
     return roleManager.createRole(
-                metalake,
-                role,
-                properties,
-                privilegeEntityIdentifier,
-                privilegeEntityType,
-                privileges);
+        metalake, role, properties, privilegeEntityIdentifier, privilegeEntityType, privileges);
   }
 
   /**
@@ -248,5 +271,20 @@ public class AccessControlManager {
    */
   public boolean dropRole(String metalake, String role) {
     return roleManager.dropRole(metalake, role);
+  }
+
+  /**
+   * * This interface is used for mapping a given userName to a set of groups which it belongs to.
+   *
+   * @param user name of User
+   * @return set of groups that the user belongs to. If Gravitino doesn't configure group mapping
+   *     service, it will return an empty set.
+   */
+  public Set<String> getGroupsByUser(String user) {
+    if (groupMappingServiceProvider == null) {
+      return Collections.emptySet();
+    }
+
+    return groupMappingServiceProvider.getGroups(user);
   }
 }

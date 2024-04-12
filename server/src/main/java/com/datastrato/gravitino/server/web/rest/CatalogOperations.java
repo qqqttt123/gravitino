@@ -8,6 +8,7 @@ import com.datastrato.gravitino.Catalog;
 import com.datastrato.gravitino.CatalogChange;
 import com.datastrato.gravitino.NameIdentifier;
 import com.datastrato.gravitino.Namespace;
+import com.datastrato.gravitino.authorization.AuthorizationUtils;
 import com.datastrato.gravitino.catalog.CatalogManager;
 import com.datastrato.gravitino.dto.requests.CatalogCreateRequest;
 import com.datastrato.gravitino.dto.requests.CatalogUpdateRequest;
@@ -37,6 +38,9 @@ import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+
+import static com.datastrato.gravitino.authorization.AuthorizationUtils.checkPermission;
 
 @Path("/metalakes/{metalake}/catalogs")
 @Consumes(MediaType.APPLICATION_JSON)
@@ -69,6 +73,8 @@ public class CatalogOperations {
                 NameIdentifier.of(metalake),
                 LockType.READ,
                 () -> {
+                  checkPermission(NameIdentifier.ofMetalake(metalake), AuthorizationUtils::isMetalakeCreator);
+
                   if (verbose) {
                     Catalog[] catalogs = manager.listCatalogsInfo(catalogNS);
                     return Utils.ok(new CatalogListResponse(DTOConverters.toDTOs(catalogs)));
@@ -98,12 +104,16 @@ public class CatalogOperations {
                     NameIdentifier.ofMetalake(metalake),
                     LockType.WRITE,
                     () ->
-                        manager.createCatalog(
+                    {
+                        AuthorizationUtils.checkPermission(ident, AuthorizationUtils::isCatalogCreator);
+
+                        return manager.createCatalog(
                             ident,
                             request.getType(),
                             request.getProvider(),
                             request.getComment(),
-                            request.getProperties()));
+                            request.getProperties());
+                    });
             return Utils.ok(new CatalogResponse(DTOConverters.toDTO(catalog)));
           });
 
@@ -121,7 +131,11 @@ public class CatalogOperations {
     try {
       NameIdentifier ident = NameIdentifier.ofCatalog(metalakeName, catalogName);
       Catalog catalog =
-          TreeLockUtils.doWithTreeLock(ident, LockType.READ, () -> manager.loadCatalog(ident));
+          TreeLockUtils.doWithTreeLock(ident, LockType.READ, () -> {
+              AuthorizationUtils.checkPermission(ident, AuthorizationUtils::isCatalogCreator);
+
+              return manager.loadCatalog(ident);
+          });
       return Utils.ok(new CatalogResponse(DTOConverters.toDTO(catalog)));
 
     } catch (Exception e) {
@@ -151,7 +165,12 @@ public class CatalogOperations {
                 TreeLockUtils.doWithTreeLock(
                     NameIdentifier.ofMetalake(metalakeName),
                     LockType.WRITE,
-                    () -> manager.alterCatalog(ident, changes));
+                    () -> {
+
+                        AuthorizationUtils.checkPermission(ident, AuthorizationUtils::isCatalogCreator);
+
+                        return manager.alterCatalog(ident, changes);
+                    });
             return Utils.ok(new CatalogResponse(DTOConverters.toDTO(catalog)));
           });
 
@@ -161,7 +180,7 @@ public class CatalogOperations {
     }
   }
 
-  @DELETE
+    @DELETE
   @Path("{catalog}")
   @Produces("application/vnd.gravitino.v1+json")
   public Response dropCatalog(
@@ -175,7 +194,10 @@ public class CatalogOperations {
                 TreeLockUtils.doWithTreeLock(
                     NameIdentifier.ofMetalake(metalakeName),
                     LockType.WRITE,
-                    () -> manager.dropCatalog(ident));
+                    () -> {
+                        AuthorizationUtils.checkPermission(ident, AuthorizationUtils::isCatalogCreator);
+                        return manager.dropCatalog(ident);
+                    });
             if (!dropped) {
               LOG.warn("Failed to drop catalog {} under metalake {}", catalogName, metalakeName);
             }
@@ -187,4 +209,5 @@ public class CatalogOperations {
           OperationType.DROP, catalogName, metalakeName, e);
     }
   }
+
 }

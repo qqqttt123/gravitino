@@ -12,6 +12,7 @@ import com.datastrato.gravitino.GravitinoEnv;
 import com.datastrato.gravitino.NameIdentifier;
 import com.datastrato.gravitino.Namespace;
 import com.datastrato.gravitino.StringIdentifier;
+import com.datastrato.gravitino.authorization.AuthorizationUtils;
 import com.datastrato.gravitino.connector.BasePropertiesMetadata;
 import com.datastrato.gravitino.connector.CatalogInfo;
 import com.datastrato.gravitino.connector.CatalogOperations;
@@ -106,6 +107,8 @@ public class HadoopCatalogOperations implements CatalogOperations, SupportsSchem
   @Override
   public NameIdentifier[] listFilesets(Namespace namespace) throws NoSuchSchemaException {
     try {
+      AuthorizationUtils.checkPermission(ident, AuthorizationUtils::isCatalogCreator);
+
       NameIdentifier schemaIdent = NameIdentifier.of(namespace.levels());
       if (!store.exists(schemaIdent, Entity.EntityType.SCHEMA)) {
         throw new NoSuchSchemaException(SCHEMA_DOES_NOT_EXIST_MSG, schemaIdent);
@@ -124,6 +127,8 @@ public class HadoopCatalogOperations implements CatalogOperations, SupportsSchem
   @Override
   public Fileset loadFileset(NameIdentifier ident) throws NoSuchFilesetException {
     try {
+      AuthorizationUtils.checkPermission(ident, AuthorizationUtils::isCatalogCreator);
+
       FilesetEntity filesetEntity =
           store.get(ident, Entity.EntityType.FILESET, FilesetEntity.class);
 
@@ -152,6 +157,8 @@ public class HadoopCatalogOperations implements CatalogOperations, SupportsSchem
       Map<String, String> properties)
       throws NoSuchSchemaException, FilesetAlreadyExistsException {
     try {
+      AuthorizationUtils.checkPermission(ident, AuthorizationUtils::isCatalogCreator);
+
       if (store.exists(ident, Entity.EntityType.FILESET)) {
         throw new FilesetAlreadyExistsException("Fileset %s already exists", ident);
       }
@@ -253,6 +260,8 @@ public class HadoopCatalogOperations implements CatalogOperations, SupportsSchem
   public Fileset alterFileset(NameIdentifier ident, FilesetChange... changes)
       throws NoSuchFilesetException, IllegalArgumentException {
     try {
+      AuthorizationUtils.checkPermission(ident, AuthorizationUtils::isCatalogCreator);
+
       if (!store.exists(ident, Entity.EntityType.FILESET)) {
         throw new NoSuchFilesetException(FILESET_DOES_NOT_EXIST_MSG, ident);
       }
@@ -291,6 +300,8 @@ public class HadoopCatalogOperations implements CatalogOperations, SupportsSchem
   @Override
   public boolean dropFileset(NameIdentifier ident) {
     try {
+      AuthorizationUtils.checkPermission(ident, AuthorizationUtils::isCatalogCreator);
+
       FilesetEntity filesetEntity =
           store.get(ident, Entity.EntityType.FILESET, FilesetEntity.class);
       Path filesetPath = new Path(filesetEntity.storageLocation());
@@ -321,6 +332,8 @@ public class HadoopCatalogOperations implements CatalogOperations, SupportsSchem
   @Override
   public NameIdentifier[] listSchemas(Namespace namespace) throws NoSuchCatalogException {
     try {
+      AuthorizationUtils.checkPermission(NameIdentifier.of(namespace.levels()), AuthorizationUtils::isCatalogCreator);
+
       List<SchemaEntity> schemas =
           store.list(namespace, SchemaEntity.class, Entity.EntityType.SCHEMA);
       return schemas.stream()
@@ -335,6 +348,8 @@ public class HadoopCatalogOperations implements CatalogOperations, SupportsSchem
   public Schema createSchema(NameIdentifier ident, String comment, Map<String, String> properties)
       throws NoSuchCatalogException, SchemaAlreadyExistsException {
     try {
+      AuthorizationUtils.checkPermission(ident, AuthorizationUtils::isCatalogCreator);
+
       if (store.exists(ident, Entity.EntityType.SCHEMA)) {
         throw new SchemaAlreadyExistsException("Schema %s already exists", ident);
       }
@@ -396,6 +411,8 @@ public class HadoopCatalogOperations implements CatalogOperations, SupportsSchem
   @Override
   public Schema loadSchema(NameIdentifier ident) throws NoSuchSchemaException {
     try {
+      AuthorizationUtils.checkPermission(ident, AuthorizationUtils::isCatalogCreator);
+
       SchemaEntity schemaEntity = store.get(ident, Entity.EntityType.SCHEMA, SchemaEntity.class);
 
       return HadoopSchema.builder()
@@ -416,6 +433,8 @@ public class HadoopCatalogOperations implements CatalogOperations, SupportsSchem
   public Schema alterSchema(NameIdentifier ident, SchemaChange... changes)
       throws NoSuchSchemaException {
     try {
+      AuthorizationUtils.checkPermission(ident, AuthorizationUtils::isCatalogCreator);
+
       if (!store.exists(ident, Entity.EntityType.SCHEMA)) {
         throw new NoSuchSchemaException(SCHEMA_DOES_NOT_EXIST_MSG, ident);
       }
@@ -454,6 +473,8 @@ public class HadoopCatalogOperations implements CatalogOperations, SupportsSchem
   @Override
   public boolean dropSchema(NameIdentifier ident, boolean cascade) throws NonEmptySchemaException {
     try {
+      AuthorizationUtils.checkPermission(ident, AuthorizationUtils::isCatalogCreator);
+
       SchemaEntity schemaEntity = store.get(ident, Entity.EntityType.SCHEMA, SchemaEntity.class);
       Map<String, String> properties =
           Optional.ofNullable(schemaEntity.properties()).orElse(Collections.emptyMap());

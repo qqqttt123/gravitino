@@ -259,4 +259,11 @@ public interface Configs {
                   valueList != null && valueList.stream().allMatch(StringUtils::isNotBlank),
               ConfigConstants.NOT_BLANK_ERROR_MSG)
           .create();
+
+  ConfigEntry<String> USER_GROUP_MAPPING =
+      new ConfigBuilder("gravitino.authorization.userGroupsMapping")
+          .doc("The class of user groups mapping")
+          .version(ConfigConstants.VERSION_0_5_0)
+          .stringConf()
+          .create();
 }
