@@ -22,6 +22,7 @@ import com.datastrato.gravitino.lock.LockType;
 import com.datastrato.gravitino.lock.TreeLockUtils;
 import com.datastrato.gravitino.metalake.MetalakeDispatcher;
 import com.datastrato.gravitino.metrics.MetricNames;
+import com.datastrato.gravitino.server.authorization.NameBindings;
 import com.datastrato.gravitino.server.web.Utils;
 import com.datastrato.gravitino.utils.NameIdentifierUtil;
 import java.util.Arrays;
@@ -44,6 +45,7 @@ import org.slf4j.LoggerFactory;
 @Path("/metalakes")
 @Consumes(MediaType.APPLICATION_JSON)
 @Produces(MediaType.APPLICATION_JSON)
+@NameBindings.MetalakeInterface
 public class MetalakeOperations {
 
   private static final Logger LOG = LoggerFactory.getLogger(MetalakeOperations.class);

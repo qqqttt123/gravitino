@@ -21,4 +21,9 @@ public class NameBindings {
   @Target({ElementType.TYPE, ElementType.METHOD})
   @Retention(RetentionPolicy.RUNTIME)
   public @interface MetalakeAdminInterface {}
+
+  @NameBinding
+  @Target({ElementType.TYPE, ElementType.METHOD})
+  @Retention(RetentionPolicy.RUNTIME)
+  public @interface MetalakeInterface {}
 }
