@@ -7,6 +7,7 @@ package com.datastrato.gravitino.authorization;
 import com.datastrato.gravitino.Entity;
 import com.datastrato.gravitino.EntityStore;
 import com.datastrato.gravitino.GravitinoEnv;
+import com.datastrato.gravitino.MetadataObject;
 import com.datastrato.gravitino.NameIdentifier;
 import com.datastrato.gravitino.Namespace;
 import com.datastrato.gravitino.exceptions.ForbiddenException;
@@ -172,24 +173,26 @@ public class AuthorizationUtils {
             Maps.newHashMap(),
             Lists.newArrayList(securableObject));
 
-    Role loadMetalakeRole =
-        accessControlManager.createRole(
-            metalake,
-            String.format(
-                "%s_%s_%s_%s",
-                Entity.SYSTEM_RESERVED_ROLE_NAME_PREFIX,
-                SecurableObject.Type.METALAKE.name().toLowerCase(),
-                metalake,
-                Privileges.UseMetalake.allow().name().name().toLowerCase()),
-            Maps.newHashMap(),
-            Lists.newArrayList(
-                SecurableObjects.ofMetalake(
-                    metalake, Lists.newArrayList(Privileges.UseMetalake.allow()))));
+    List<String> roleNames = Lists.newArrayList(allPrivilegesRole.name());
 
-    accessControlManager.grantRolesToUser(
-        metalake,
-        Lists.newArrayList(allPrivilegesRole.name(), loadMetalakeRole.name()),
-        currentUser);
+    if (securableObject.type().equals(MetadataObject.Type.METALAKE)) {
+      Role loadMetalakeRole =
+          accessControlManager.createRole(
+              metalake,
+              String.format(
+                  "%s_%s_%s_%s",
+                  Entity.SYSTEM_RESERVED_ROLE_NAME_PREFIX,
+                  SecurableObject.Type.METALAKE.name().toLowerCase(),
+                  metalake,
+                  Privileges.UseMetalake.allow().name().name().toLowerCase()),
+              Maps.newHashMap(),
+              Lists.newArrayList(
+                  SecurableObjects.ofMetalake(
+                      metalake, Lists.newArrayList(Privileges.UseMetalake.allow()))));
+      roleNames.add(loadMetalakeRole.name());
+    }
+
+    accessControlManager.grantRolesToUser(metalake, roleNames, currentUser);
   }
 
   public static Void checkMetalakeExists(String metalake) throws NoSuchMetalakeException {

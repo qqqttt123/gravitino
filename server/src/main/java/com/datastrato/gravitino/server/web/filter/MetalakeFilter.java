@@ -34,24 +34,24 @@ import javax.ws.rs.ext.Provider;
 public class MetalakeFilter implements BasedRoleFilter, ContainerResponseFilter {
 
   private final List<Privilege> allMetalakePrivileges =
-          Lists.newArrayList(
-                  Privileges.UseMetalake.allow(),
-                  Privileges.ManageMetalake.allow(),
-                  Privileges.UseCatalog.allow(),
-                  Privileges.CreateCatalog.allow(),
-                  Privileges.AlterCatalog.allow(),
-                  Privileges.DropCatalog.allow(),
-                  Privileges.CreateRole.allow(),
-                  Privileges.GetRole.allow(),
-                  Privileges.DeleteRole.allow(),
-                  Privileges.AddUser.allow(),
-                  Privileges.GetUser.allow(),
-                  Privileges.RemoveUser.allow(),
-                  Privileges.AddGroup.allow(),
-                  Privileges.RemoveGroup.allow(),
-                  Privileges.GetGroup.allow(),
-                  Privileges.GrantRole.allow(),
-                  Privileges.RevokeRole.allow());
+      Lists.newArrayList(
+          Privileges.UseMetalake.allow(),
+          Privileges.ManageMetalake.allow(),
+          Privileges.UseCatalog.allow(),
+          Privileges.CreateCatalog.allow(),
+          Privileges.AlterCatalog.allow(),
+          Privileges.DropCatalog.allow(),
+          Privileges.CreateRole.allow(),
+          Privileges.GetRole.allow(),
+          Privileges.DeleteRole.allow(),
+          Privileges.AddUser.allow(),
+          Privileges.GetUser.allow(),
+          Privileges.RemoveUser.allow(),
+          Privileges.AddGroup.allow(),
+          Privileges.RemoveGroup.allow(),
+          Privileges.GetGroup.allow(),
+          Privileges.GrantRole.allow(),
+          Privileges.RevokeRole.allow());
 
   @Override
   public void filter(ContainerRequestContext requestContext) throws IOException {
@@ -127,37 +127,39 @@ public class MetalakeFilter implements BasedRoleFilter, ContainerResponseFilter 
   }
 
   public void filter(
-          ContainerRequestContext requestContext, ContainerResponseContext responseContext)
-          throws IOException {
+      ContainerRequestContext requestContext, ContainerResponseContext responseContext)
+      throws IOException {
     if (getOperateType(requestContext).equals(OperationType.LIST)) {
       if (responseContext.getStatus() == Response.Status.OK.getStatusCode()) {
+        // Filter the metalake which we don't have any privilege.
         MetalakeListResponse response = (MetalakeListResponse) responseContext.getEntity();
         List<MetalakeDTO> filteredMetalakes = Lists.newArrayList();
         for (MetalakeDTO metalakeDTO : response.getMetalakes()) {
           try {
             AuthorizationUtils.checkPermission(
-                    metalakeDTO.name(),
-                    SecurableObjects.ofMetalake(metalakeDTO.name(), allMetalakePrivileges));
+                metalakeDTO.name(),
+                SecurableObjects.ofMetalake(metalakeDTO.name(), allMetalakePrivileges));
             filteredMetalakes.add(metalakeDTO);
           } catch (ForbiddenException fe) {
             // ignore the metalake
           }
         }
         responseContext.setEntity(
-                new MetalakeListResponse(filteredMetalakes.toArray(new MetalakeDTO[0])));
+            new MetalakeListResponse(filteredMetalakes.toArray(new MetalakeDTO[0])));
       }
     } else if (getOperateType(requestContext).equals(OperationType.CREATE)) {
       if (responseContext.getStatus() == Response.Status.OK.getStatusCode()) {
+        // Create a system role for the metalake newly created.
         MetalakeResponse response = (MetalakeResponse) responseContext.getEntity();
         SecurableObject securableObject =
-                SecurableObjects.ofMetalake(response.getMetalake().name(), allMetalakePrivileges);
+            SecurableObjects.ofMetalake(response.getMetalake().name(), allMetalakePrivileges);
         AuthorizationUtils.createAndGrantSystemRoleForSecurableObject(
-                response.getMetalake().name(),
-                securableObject,
-                ((UserPrincipal)
-                        requestContext.getProperty(
-                                AuthConstants.AUTHENTICATED_PRINCIPAL_ATTRIBUTE_NAME))
-                        .getName());
+            response.getMetalake().name(),
+            securableObject,
+            ((UserPrincipal)
+                    requestContext.getProperty(
+                        AuthConstants.AUTHENTICATED_PRINCIPAL_ATTRIBUTE_NAME))
+                .getName());
       }
     }
   }
