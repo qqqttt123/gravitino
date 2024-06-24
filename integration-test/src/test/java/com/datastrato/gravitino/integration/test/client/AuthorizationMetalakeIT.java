@@ -138,7 +138,7 @@ public class AuthorizationMetalakeIT extends AbstractIT {
     Assertions.assertEquals("test1", metalake.name());
 
     // Delete all privileges role
-    client.deleteRole("test", "system_role_metalake_test");
+    client.deleteRole("test1", "system_role_metalake_test");
 
     Assertions.assertThrows(
         ForbiddenException.class,

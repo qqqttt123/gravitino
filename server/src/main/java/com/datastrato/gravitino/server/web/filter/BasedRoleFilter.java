@@ -14,7 +14,6 @@ interface BasedRoleFilter extends ContainerRequestFilter {
   String POST = "POST";
   String PUT = "PUT";
   String DELETE = "DELETE";
-  String METALAKE = "metalake";
 
   /**
    * According to the request information, we return the securable object which the operation need.
