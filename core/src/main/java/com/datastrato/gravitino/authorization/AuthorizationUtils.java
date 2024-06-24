@@ -14,6 +14,8 @@ import com.datastrato.gravitino.exceptions.NoSuchMetalakeException;
 import com.datastrato.gravitino.exceptions.NoSuchUserException;
 import com.datastrato.gravitino.meta.RoleEntity;
 import com.datastrato.gravitino.utils.PrincipalUtils;
+import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
 import java.io.IOException;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -150,6 +152,44 @@ public class AuthorizationUtils {
     }
 
     return false;
+  }
+
+  // One securable object is created, we should create a system role for this securable object,
+  // The role should have all privileges of this securable object. This role is granted to the
+  // creator.
+  public static void createAndGrantSystemRoleForSecurableObject(
+      String metalake, SecurableObject securableObject, String currentUser) {
+    AccessControlManager accessControlManager = GravitinoEnv.getInstance().accessControlManager();
+    accessControlManager.addUser(metalake, currentUser);
+    Role allPrivilegesRole =
+        accessControlManager.createRole(
+            metalake,
+            String.format(
+                "%s_%s_%s",
+                Entity.SYSTEM_RESERVED_ROLE_NAME_PREFIX,
+                securableObject.type().name().toLowerCase(),
+                securableObject.fullName()),
+            Maps.newHashMap(),
+            Lists.newArrayList(securableObject));
+
+    Role loadMetalakeRole =
+        accessControlManager.createRole(
+            metalake,
+            String.format(
+                "%s_%s_%s_%s",
+                Entity.SYSTEM_RESERVED_ROLE_NAME_PREFIX,
+                SecurableObject.Type.METALAKE.name().toLowerCase(),
+                metalake,
+                Privileges.UseMetalake.allow().name().name().toLowerCase()),
+            Maps.newHashMap(),
+            Lists.newArrayList(
+                SecurableObjects.ofMetalake(
+                    metalake, Lists.newArrayList(Privileges.UseMetalake.allow()))));
+
+    accessControlManager.grantRolesToUser(
+        metalake,
+        Lists.newArrayList(allPrivilegesRole.name(), loadMetalakeRole.name()),
+        currentUser);
   }
 
   public static Void checkMetalakeExists(String metalake) throws NoSuchMetalakeException {

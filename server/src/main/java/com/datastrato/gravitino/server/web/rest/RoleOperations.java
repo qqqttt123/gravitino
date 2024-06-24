@@ -6,6 +6,7 @@ package com.datastrato.gravitino.server.web.rest;
 
 import com.codahale.metrics.annotation.ResponseMetered;
 import com.codahale.metrics.annotation.Timed;
+import com.datastrato.gravitino.Entity;
 import com.datastrato.gravitino.GravitinoEnv;
 import com.datastrato.gravitino.NameIdentifier;
 import com.datastrato.gravitino.authorization.AccessControlManager;
@@ -87,6 +88,11 @@ public class RoleOperations {
           NameIdentifier.of(metalake),
           LockType.READ,
           () -> AuthorizationUtils.checkMetalakeExists(metalake));
+
+      if (request.getName().startsWith(Entity.SYSTEM_RESERVED_ROLE_NAME_PREFIX)) {
+        throw new IllegalArgumentException(
+            "Can't create a role with with reserved prefix `system_role`");
+      }
 
       return Utils.doAs(
           httpRequest,

@@ -79,10 +79,6 @@ class RoleManager {
       Map<String, String> properties,
       List<SecurableObject> securableObjects)
       throws RoleAlreadyExistsException {
-    if (role.startsWith(Entity.SYSTEM_RESERVED_ROLE_NAME_PREFIX)) {
-      throw new IllegalArgumentException(
-          "Can't create a role with with reserved prefix `system_role`");
-    }
 
     RoleEntity roleEntity =
         RoleEntity.builder()
@@ -167,10 +163,11 @@ class RoleManager {
         if (roleEntity.id().equals(roleIds.get(index))) {
           roleEntities.add(roleEntity);
         }
-        index++;
 
       } catch (NoSuchEntityException nse) {
         // ignore this entity
+      } finally {
+        index++;
       }
     }
     return roleEntities;

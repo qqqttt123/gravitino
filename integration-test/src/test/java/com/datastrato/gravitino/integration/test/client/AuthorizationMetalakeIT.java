@@ -63,11 +63,20 @@ public class AuthorizationMetalakeIT extends AbstractIT {
     registerCustomConfigs(configs);
     AbstractIT.startIntegrationTest();
 
-    // TODO: Add more cases after we can create a system role for the created newly metalake.
     client.addMetalakeAdmin(AuthConstants.ANONYMOUS_USER);
     client.createMetalake("test", "", Collections.emptyMap());
     GravitinoMetalake[] metalakes = client.listMetalakes();
     Assertions.assertEquals(1, metalakes.length);
+
+    // Delete all privileges role
+    client.deleteRole("test", "system_role_metalake_test");
+    metalakes = client.listMetalakes();
+    Assertions.assertEquals(1, metalakes.length);
+
+    // Delete load metalake role
+    client.deleteRole("test", "system_role_metalake_test_use_metalake");
+    metalakes = client.listMetalakes();
+    Assertions.assertEquals(0, metalakes.length);
   }
 
   @Test
@@ -78,9 +87,18 @@ public class AuthorizationMetalakeIT extends AbstractIT {
     registerCustomConfigs(configs);
     AbstractIT.startIntegrationTest();
 
-    // TODO: Add more cases after we can create a system role for the created newly metalake.
     client.addMetalakeAdmin(AuthConstants.ANONYMOUS_USER);
     client.createMetalake("test", "", Collections.emptyMap());
+    GravitinoMetalake metalake = client.loadMetalake("test");
+    Assertions.assertEquals("test", metalake.name());
+
+    // Delete all privileges role
+    client.deleteRole("test", "system_role_metalake_test");
+    metalake = client.loadMetalake("test");
+    Assertions.assertEquals("test", metalake.name());
+
+    // Delete load metalake role
+    client.deleteRole("test", "system_role_metalake_test_use_metalake");
     Assertions.assertThrows(ForbiddenException.class, () -> client.loadMetalake("test"));
   }
 
@@ -92,9 +110,16 @@ public class AuthorizationMetalakeIT extends AbstractIT {
     registerCustomConfigs(configs);
     AbstractIT.startIntegrationTest();
 
-    // TODO: Add more cases after we can create a system role for the created newly metalake.
     client.addMetalakeAdmin(AuthConstants.ANONYMOUS_USER);
     client.createMetalake("test", "", Collections.emptyMap());
+
+    Assertions.assertTrue(client.dropMetalake("test"));
+
+    client.createMetalake("test", "", Collections.emptyMap());
+
+    // Delete all privileges role
+    client.deleteRole("test", "system_role_metalake_test");
+
     Assertions.assertThrows(ForbiddenException.class, () -> client.dropMetalake("test"));
   }
 
@@ -106,11 +131,17 @@ public class AuthorizationMetalakeIT extends AbstractIT {
     registerCustomConfigs(configs);
     AbstractIT.startIntegrationTest();
 
-    // TODO: Add more cases after we can create a system role for the created newly metalake.
     client.addMetalakeAdmin(AuthConstants.ANONYMOUS_USER);
     client.createMetalake("test", "", Collections.emptyMap());
+
+    GravitinoMetalake metalake = client.alterMetalake("test", MetalakeChange.rename("test1"));
+    Assertions.assertEquals("test1", metalake.name());
+
+    // Delete all privileges role
+    client.deleteRole("test", "system_role_metalake_test");
+
     Assertions.assertThrows(
         ForbiddenException.class,
-        () -> client.alterMetalake("test", new MetalakeChange[] {MetalakeChange.rename("test1")}));
+        () -> client.alterMetalake("test1", MetalakeChange.rename("test2")));
   }
 }

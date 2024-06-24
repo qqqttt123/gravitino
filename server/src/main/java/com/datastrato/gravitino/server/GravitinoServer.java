@@ -25,6 +25,7 @@ import com.datastrato.gravitino.server.web.VersioningFilter;
 import com.datastrato.gravitino.server.web.filter.AccessControlNotAllowedFilter;
 import com.datastrato.gravitino.server.web.filter.MetalakeAdminFilter;
 import com.datastrato.gravitino.server.web.filter.MetalakeFilter;
+import com.datastrato.gravitino.server.web.filter.MetalakeResponseFilter;
 import com.datastrato.gravitino.server.web.ui.WebUIFilter;
 import java.io.File;
 import java.util.Properties;
@@ -82,7 +83,6 @@ public class GravitinoServer extends ResourceConfig {
           protected void configure() {
             bind(gravitinoEnv.metalakeDispatcher()).to(MetalakeDispatcher.class).ranked(1);
             bind(gravitinoEnv.catalogDispatcher()).to(CatalogDispatcher.class).ranked(1);
-
             bind(gravitinoEnv.schemaDispatcher()).to(SchemaDispatcher.class).ranked(1);
             bind(gravitinoEnv.tableDispatcher()).to(TableDispatcher.class).ranked(1);
             bind(gravitinoEnv.partitionDispatcher()).to(PartitionDispatcher.class).ranked(1);
@@ -95,6 +95,7 @@ public class GravitinoServer extends ResourceConfig {
     if (enableAuthorization) {
       register(MetalakeAdminFilter.class);
       register(MetalakeFilter.class);
+      register(MetalakeResponseFilter.class);
     } else {
       register(AccessControlNotAllowedFilter.class);
     }
