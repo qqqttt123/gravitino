@@ -181,6 +181,7 @@ allprojects {
       param.environment("GRAVITINO_CI_RANGER_DOCKER_IMAGE", "apache/gravitino-ci:ranger-0.1.1")
       param.environment("GRAVITINO_CI_KAFKA_DOCKER_IMAGE", "apache/kafka:3.7.0")
       param.environment("GRAVITINO_CI_LOCALSTACK_DOCKER_IMAGE", "localstack/localstack:latest")
+      param.environment("TESTCONTAINERS_RYUK_DISABLED", "true")
 
       // Disable Ryuk for integration tests
       // Ryuk need privileged mode, if we want to rootless or run non-privileged mode, we need to disable it.
