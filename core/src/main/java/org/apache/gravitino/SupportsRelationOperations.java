@@ -36,7 +36,8 @@ public interface SupportsRelationOperations {
     /** Role and user relationship */
     ROLE_USER_REL,
     /** Role and group relationship */
-    ROLE_GROUP_REL
+    ROLE_GROUP_REL,
+    METADATA_OBJECT_STAT_REL
   }
 
   /**
@@ -91,4 +92,9 @@ public interface SupportsRelationOperations {
       Entity.EntityType dstType,
       boolean override)
       throws IOException;
+
+  <E extends Entity & HasIdentifier> void insertEntitiesAndRelations(
+      Type relType, List<E> entities, List<Relation> relations) throws IOException;
+
+  void deleteRelations(Type relType, List<Relation> relations) throws IOException;
 }

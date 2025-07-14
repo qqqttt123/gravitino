@@ -73,6 +73,7 @@ import org.apache.gravitino.metalake.MetalakeManager;
 import org.apache.gravitino.metalake.MetalakeNormalizeDispatcher;
 import org.apache.gravitino.metrics.MetricsSystem;
 import org.apache.gravitino.metrics.source.JVMMetricsSource;
+import org.apache.gravitino.stats.StatisticManager;
 import org.apache.gravitino.storage.IdGenerator;
 import org.apache.gravitino.storage.RandomIdGenerator;
 import org.apache.gravitino.tag.TagDispatcher;
@@ -134,6 +135,7 @@ public class GravitinoEnv {
   private EventBus eventBus;
   private OwnerManager ownerManager;
   private FutureGrantManager futureGrantManager;
+  private StatisticManager statisticManager;
 
   protected GravitinoEnv() {}
 
@@ -364,6 +366,10 @@ public class GravitinoEnv {
     return eventListenerManager;
   }
 
+  public StatisticManager statisticManager() {
+    return statisticManager;
+  }
+
   public void start() {
     metricsSystem.start();
     eventListenerManager.start();
@@ -499,6 +505,7 @@ public class GravitinoEnv {
     ModelNormalizeDispatcher modelNormalizeDispatcher =
         new ModelNormalizeDispatcher(modelHookDispatcher, catalogManager);
     this.modelDispatcher = new ModelEventDispatcher(eventBus, modelNormalizeDispatcher);
+    this.statisticManager = new StatisticManager(entityStore, idGenerator);
 
     // Create and initialize access control related modules
     boolean enableAuthorization = config.get(Configs.ENABLE_AUTHORIZATION);

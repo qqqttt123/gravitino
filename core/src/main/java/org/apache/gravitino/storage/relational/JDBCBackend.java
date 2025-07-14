@@ -20,13 +20,23 @@
 package org.apache.gravitino.storage.relational;
 
 import static org.apache.gravitino.Configs.GARBAGE_COLLECTOR_SINGLE_DELETION_LIMIT;
+import static org.apache.gravitino.Entity.EntityType.FILESET;
+import static org.apache.gravitino.Entity.EntityType.MODEL;
+import static org.apache.gravitino.Entity.EntityType.TABLE;
+import static org.apache.gravitino.Entity.EntityType.TOPIC;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Maps;
+import com.google.common.collect.Sets;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
+import java.util.stream.Collectors;
+import org.apache.commons.lang3.tuple.Pair;
 import org.apache.gravitino.Config;
 import org.apache.gravitino.Configs;
 import org.apache.gravitino.Entity;
@@ -35,6 +45,7 @@ import org.apache.gravitino.HasIdentifier;
 import org.apache.gravitino.MetadataObject;
 import org.apache.gravitino.NameIdentifier;
 import org.apache.gravitino.Namespace;
+import org.apache.gravitino.Relation;
 import org.apache.gravitino.SupportsRelationOperations;
 import org.apache.gravitino.UnsupportedEntityTypeException;
 import org.apache.gravitino.exceptions.NoSuchEntityException;
@@ -46,6 +57,7 @@ import org.apache.gravitino.meta.ModelEntity;
 import org.apache.gravitino.meta.ModelVersionEntity;
 import org.apache.gravitino.meta.RoleEntity;
 import org.apache.gravitino.meta.SchemaEntity;
+import org.apache.gravitino.meta.StatisticEntity;
 import org.apache.gravitino.meta.TableEntity;
 import org.apache.gravitino.meta.TagEntity;
 import org.apache.gravitino.meta.TopicEntity;
@@ -68,6 +80,7 @@ import org.apache.gravitino.storage.relational.service.TagMetaService;
 import org.apache.gravitino.storage.relational.service.TopicMetaService;
 import org.apache.gravitino.storage.relational.service.UserMetaService;
 import org.apache.gravitino.storage.relational.session.SqlSessionFactoryHelper;
+import org.apache.gravitino.utils.NameIdentifierUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -460,6 +473,16 @@ public class JDBCBackend implements RelationalBackend {
           throw new IllegalArgumentException(
               String.format("ROLE_USER_REL doesn't support type %s", identType.name()));
         }
+      case METADATA_OBJECT_STAT_REL:
+        Set<Entity.EntityType> allowTypes = Sets.newHashSet(FILESET, TABLE, TOPIC, MODEL);
+
+        if (allowTypes.contains(identType)) {
+          return (List<E>)
+              StatisticMetaService.getInstance().listStatisticsByObject(nameIdentifier, identType);
+        } else {
+          throw new IllegalArgumentException(
+              String.format("METADATA_OBJECT_STAT_REL doesn't support type %s", identType.name()));
+        }
       default:
         throw new IllegalArgumentException(
             String.format("Doesn't support the relation type %s", relType));
@@ -482,6 +505,91 @@ public class JDBCBackend implements RelationalBackend {
         throw new IllegalArgumentException(
             String.format("Doesn't support the relation type %s", relType));
     }
+  }
+
+  @Override
+  public <E extends Entity & HasIdentifier> void insertEntitiesAndRelations(
+      Type relType, List<E> entities, List<Relation> relations) throws IOException {
+    switch (relType) {
+      case METADATA_OBJECT_STAT_REL:
+        Map<Pair<NameIdentifier, Entity.EntityType>, List<Pair<NameIdentifier, Entity.EntityType>>>
+            relationMaps = getPairListMap(relations);
+
+        if (relationMaps.isEmpty()) {
+          return;
+        }
+
+        Preconditions.checkArgument(
+            relationMaps.size() == 1,
+            "Can't update multiple source entities in the delete meta object stats operation");
+
+        StatisticMetaService metaService = StatisticMetaService.getInstance();
+        relationMaps.forEach(
+            (key, value) -> {
+              MetadataObject metadataObject =
+                  NameIdentifierUtil.toMetadataObject(key.getLeft(), key.getRight());
+              List<String> statsToDelete =
+                  value.stream().map(pair -> pair.getLeft().name()).collect(Collectors.toList());
+              String metalake = NameIdentifierUtil.getMetalake(key.getLeft());
+              metaService.batchDeleteStatisticPOs(metalake, metadataObject, statsToDelete);
+              metaService.batchInsertStatisticPOs(
+                  (List<StatisticEntity>) entities, metalake, key.getLeft(), key.getRight());
+            });
+        break;
+      default:
+        throw new IllegalArgumentException(
+            String.format("Doesn't support the relation type %s", relType));
+    }
+  }
+
+  @Override
+  public void deleteRelations(Type relType, List<Relation> relations) throws IOException {
+    switch (relType) {
+      case METADATA_OBJECT_STAT_REL:
+        Map<Pair<NameIdentifier, Entity.EntityType>, List<Pair<NameIdentifier, Entity.EntityType>>>
+            relationMaps = getPairListMap(relations);
+
+        if (relationMaps.isEmpty()) {
+          return;
+        }
+
+        Preconditions.checkArgument(
+            relationMaps.size() == 1,
+            "Can't delete multiple source entities in the delete meta object stats operation");
+
+        relationMaps.forEach(
+            (key, value) -> {
+              MetadataObject metadataObject =
+                  NameIdentifierUtil.toMetadataObject(key.getLeft(), key.getRight());
+              List<String> statsToDelete =
+                  value.stream().map(pair -> pair.getLeft().name()).collect(Collectors.toList());
+              StatisticMetaService.getInstance()
+                  .batchDeleteStatisticPOs(
+                      NameIdentifierUtil.getMetalake(key.getLeft()), metadataObject, statsToDelete);
+            });
+        break;
+      default:
+        throw new IllegalArgumentException(
+            String.format("Doesn't support the relation type %s", relType));
+    }
+  }
+
+  private static Map<
+          Pair<NameIdentifier, Entity.EntityType>, List<Pair<NameIdentifier, Entity.EntityType>>>
+      getPairListMap(List<Relation> relations) {
+    Map<Pair<NameIdentifier, Entity.EntityType>, List<Pair<NameIdentifier, Entity.EntityType>>>
+        relationMaps = Maps.newHashMap();
+    for (Relation relation : relations) {
+      NameIdentifier srcIdent = relation.getSourceIdent();
+      Entity.EntityType srcType = relation.getSourceType();
+      NameIdentifier destIdent = relation.getDestIdent();
+      Entity.EntityType destType = relation.getDestType();
+
+      Pair<NameIdentifier, Entity.EntityType> srcPair = Pair.of(srcIdent, srcType);
+      Pair<NameIdentifier, Entity.EntityType> destPair = Pair.of(destIdent, destType);
+      relationMaps.computeIfAbsent(srcPair, k -> Lists.newArrayList()).add(destPair);
+    }
+    return relationMaps;
   }
 
   public enum JDBCBackendType {
