@@ -32,17 +32,22 @@ import org.apache.gravitino.credential.SupportsCredentials;
 import org.apache.gravitino.dto.file.FilesetDTO;
 import org.apache.gravitino.exceptions.NoSuchTagException;
 import org.apache.gravitino.file.Fileset;
+import org.apache.gravitino.stats.Statistic;
+import org.apache.gravitino.stats.StatisticValue;
+import org.apache.gravitino.stats.SupportsStatistics;
 import org.apache.gravitino.tag.SupportsTags;
 import org.apache.gravitino.tag.Tag;
 
 /** Represents a generic fileset. */
-class GenericFileset implements Fileset, SupportsTags, SupportsRoles, SupportsCredentials {
+class GenericFileset
+    implements Fileset, SupportsTags, SupportsRoles, SupportsCredentials, SupportsStatistics {
 
   private final FilesetDTO filesetDTO;
 
   private final MetadataObjectTagOperations objectTagOperations;
   private final MetadataObjectRoleOperations objectRoleOperations;
   private final MetadataObjectCredentialOperations objectCredentialOperations;
+  private final MetadataObjectStatisticsOperations objectStatisticsOperations;
 
   GenericFileset(FilesetDTO filesetDTO, RESTClient restClient, Namespace filesetNs) {
     this.filesetDTO = filesetDTO;
@@ -55,6 +60,9 @@ class GenericFileset implements Fileset, SupportsTags, SupportsRoles, SupportsCr
         new MetadataObjectRoleOperations(filesetNs.level(0), filesetObject, restClient);
     this.objectCredentialOperations =
         new MetadataObjectCredentialOperations(filesetNs.level(0), filesetObject, restClient);
+    this.objectStatisticsOperations =
+        new MetadataObjectStatisticsOperations(
+            filesetNs.level(0), filesetNs.level(1), filesetObject, restClient);
   }
 
   @Override
@@ -149,5 +157,20 @@ class GenericFileset implements Fileset, SupportsTags, SupportsRoles, SupportsCr
   @Override
   public int hashCode() {
     return filesetDTO.hashCode();
+  }
+
+  @Override
+  public List<Statistic> listStatistics() {
+    return objectStatisticsOperations.listStatistics();
+  }
+
+  @Override
+  public List<Statistic> updateStatistics(Map<String, StatisticValue<?>> statistics) {
+    return objectStatisticsOperations.updateStatistics(statistics);
+  }
+
+  @Override
+  public boolean dropStatistics(List<String> statistics) {
+    return objectStatisticsOperations.dropStatistics(statistics);
   }
 }
