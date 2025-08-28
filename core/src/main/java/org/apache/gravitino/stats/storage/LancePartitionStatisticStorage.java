@@ -59,7 +59,6 @@ import org.apache.gravitino.meta.AuditInfo;
 import org.apache.gravitino.meta.TableEntity;
 import org.apache.gravitino.stats.PartitionRange;
 import org.apache.gravitino.stats.PartitionStatisticsDrop;
-import org.apache.gravitino.stats.PartitionStatisticsModification;
 import org.apache.gravitino.stats.PartitionStatisticsUpdate;
 import org.apache.gravitino.stats.StatisticValue;
 import org.apache.gravitino.utils.MetadataObjectUtil;
@@ -177,19 +176,20 @@ public class LancePartitionStatisticStorage implements PartitionStatisticStorage
         Entity.EntityType type = MetadataObjectUtil.toEntityType(objectUpdate.metadataObject());
 
         Long tableId = entityStore.get(identifier, type, TableEntity.class).id();
-        List<PartitionStatisticsDrop> partitionDrops =
-            objectUpdate.partitionUpdates().stream()
-                .map(
-                    partitionStatisticsUpdate ->
-                        PartitionStatisticsModification.drop(
-                            partitionStatisticsUpdate.partitionName(),
-                            Lists.newArrayList(partitionStatisticsUpdate.statistics().keySet())))
-                .collect(Collectors.toList());
+        /*List<PartitionStatisticsDrop> partitionDrops =
+           objectUpdate.partitionUpdates().stream()
+               .map(
+                   partitionStatisticsUpdate ->
+                       PartitionStatisticsModification.drop(
+                           partitionStatisticsUpdate.partitionName(),
+                           Lists.newArrayList(partitionStatisticsUpdate.statistics().keySet())))
+               .collect(Collectors.toList());
+        */
 
         // TODO: Lance Java API doesn't support the upsert operations although Python API has
         // already supported it. We should push Lance community to support it, otherwise  we can't
         // accomplish update operation in one transaction.
-        dropStatisticsImpl(tableId, partitionDrops);
+        // dropStatisticsImpl(tableId, partitionDrops);
         appendStatisticsImpl(tableId, objectUpdate.partitionUpdates());
       }
     } catch (IOException ioe) {

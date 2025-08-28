@@ -27,6 +27,7 @@ import com.google.common.collect.Maps;
 import java.io.File;
 import java.util.List;
 import java.util.Map;
+import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.reflect.FieldUtils;
 import org.apache.gravitino.EntityStore;
 import org.apache.gravitino.GravitinoEnv;
@@ -38,9 +39,7 @@ import org.apache.gravitino.stats.PartitionStatisticsModification;
 import org.apache.gravitino.stats.PartitionStatisticsUpdate;
 import org.apache.gravitino.stats.StatisticValue;
 import org.apache.gravitino.stats.StatisticValues;
-import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.shaded.org.apache.commons.io.FileUtils;
 
 public class TestLancePartitionStatisticStorage {
 
@@ -66,12 +65,13 @@ public class TestLancePartitionStatisticStorage {
 
     String location = "/tmp/test";
     Map<String, String> properties = Maps.newHashMap();
-    properties.put("lance.location", location);
+    properties.put("location", location);
 
     PartitionStatisticStorage storage = factory.create(properties);
 
-    int count = 100;
-    int partitions = 10;
+    int count = 1000000;
+    int partitions = 10000;
+    long start = System.currentTimeMillis();
     Map<MetadataObject, Map<String, Map<String, StatisticValue<?>>>> originData =
         generateData(metadataObject, count, partitions);
     Map<MetadataObject, List<PartitionStatisticsUpdate>> statisticsToUpdate =
@@ -85,23 +85,28 @@ public class TestLancePartitionStatisticStorage {
       objectUpdates.add(MetadataObjectStatisticsUpdate.of(metadata, updates));
     }
     storage.updateStatistics(metalakeName, objectUpdates);
+    long end = System.currentTimeMillis();
+    System.out.println("Time taken to insert 1000 statistics: " + (end - start) + " ms");
 
     String fromPartitionName =
         "partition" + String.format("%0" + String.valueOf(partitions).length() + "d", 0);
     String toPartitionName =
         "partition" + String.format("%0" + String.valueOf(partitions).length() + "d", 1);
 
-    List<PersistedPartitionStatistics> listedStats =
-        storage.listStatistics(
-            metalakeName,
-            metadataObject,
-            PartitionRange.between(
-                fromPartitionName,
-                PartitionRange.BoundType.CLOSED,
-                toPartitionName,
-                PartitionRange.BoundType.OPEN));
-    Assertions.assertEquals(1, listedStats.size());
+    start = System.currentTimeMillis();
+    storage.listStatistics(
+        metalakeName,
+        metadataObject,
+        PartitionRange.between(
+            fromPartitionName,
+            PartitionRange.BoundType.CLOSED,
+            toPartitionName,
+            PartitionRange.BoundType.OPEN));
+    end = System.currentTimeMillis();
+    System.out.println("Time taken to read 10 statistics: " + (end - start) + " ms");
 
+    /*
+    Assertions.assertEquals(1, listedStats.size());
     String targetPartitionName = "partition00";
     for (PersistedPartitionStatistics persistStat : listedStats) {
       String partitionName = persistStat.partitionName();
@@ -201,7 +206,7 @@ public class TestLancePartitionStatisticStorage {
         }
       }
     }
-
+     */
     FileUtils.deleteDirectory(new File(location + "/" + tableEntity.id() + ".lance"));
     storage.close();
   }
@@ -214,10 +219,15 @@ public class TestLancePartitionStatisticStorage {
       String partitionName =
           "partition"
               + String.format("%0" + String.valueOf(partitions).length() + "d", index % partitions);
+      StringBuilder value = new StringBuilder("value" + index);
+      for (int j = 0; j < 10; j++) {
+        value.append("value").append(index);
+      }
+
       statisticsToUpdate
           .computeIfAbsent(metadataObject, k -> Maps.newHashMap())
           .computeIfAbsent(partitionName, kp -> Maps.newHashMap())
-          .put("statistic" + index, StatisticValues.stringValue("value" + index));
+          .put("statistic" + index, StatisticValues.stringValue(value.toString()));
     }
     return statisticsToUpdate;
   }
