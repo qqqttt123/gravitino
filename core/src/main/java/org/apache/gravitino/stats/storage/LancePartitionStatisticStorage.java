@@ -26,6 +26,7 @@ import com.lancedb.lance.Dataset;
 import com.lancedb.lance.Fragment;
 import com.lancedb.lance.FragmentMetadata;
 import com.lancedb.lance.FragmentOperation;
+import com.lancedb.lance.ReadOptions;
 import com.lancedb.lance.WriteParams;
 import com.lancedb.lance.ipc.LanceScanner;
 import com.lancedb.lance.ipc.ScanOptions;
@@ -103,6 +104,7 @@ public class LancePartitionStatisticStorage implements PartitionStatisticStorage
   private final int readBatchSize;
 
   private final EntityStore entityStore = GravitinoEnv.getInstance().entityStore();
+  private Dataset dataset;
 
   public LancePartitionStatisticStorage(Map<String, String> properties) {
     this.allocator = new RootAllocator();
@@ -317,6 +319,9 @@ public class LancePartitionStatisticStorage implements PartitionStatisticStorage
     if (allocator != null) {
       allocator.close();
     }
+    if (dataset != null) {
+      dataset.close();
+    }
   }
 
   private static String getPartitionFilter(PartitionRange range) {
@@ -357,69 +362,75 @@ public class LancePartitionStatisticStorage implements PartitionStatisticStorage
   private List<PersistedPartitionStatistics> listStatisticsImpl(
       Long tableId, String partitionFilter) {
     String fileName = getFilePath(tableId);
+    if (dataset == null) {
+      dataset = open(fileName);
+    }
 
-    try (Dataset dataset = open(fileName)) {
+    String filter = "table_id = " + tableId + partitionFilter;
 
-      String filter = "table_id = " + tableId + partitionFilter;
+    try (LanceScanner scanner =
+        dataset.newScan(
+            new ScanOptions.Builder()
+                .columns(
+                    Arrays.asList(
+                        TABLE_ID_COLUMN,
+                        PARTITION_NAME_COLUMN,
+                        STATISTIC_NAME_COLUMN,
+                        STATISTIC_VALUE_COLUMN,
+                        AUDIT_INFO_COLUMN))
+                .withRowId(true)
+                .batchSize(readBatchSize)
+                .filter(filter)
+                .build())) {
+      Map<String, List<PersistedStatistic>> partitionStatistics = Maps.newConcurrentMap();
+      try (ArrowReader reader = scanner.scanBatches()) {
+        while (reader.loadNextBatch()) {
+          VectorSchemaRoot root = reader.getVectorSchemaRoot();
+          List<FieldVector> fieldVectors = root.getFieldVectors();
+          VarCharVector partitionNameVector = (VarCharVector) fieldVectors.get(1);
+          VarCharVector statisticNameVector = (VarCharVector) fieldVectors.get(2);
+          LargeVarCharVector statisticValueVector = (LargeVarCharVector) fieldVectors.get(3);
+          LargeVarCharVector auditInfoNameVector = (LargeVarCharVector) fieldVectors.get(4);
 
-      try (LanceScanner scanner =
-          dataset.newScan(
-              new ScanOptions.Builder()
-                  .columns(
-                      Arrays.asList(
-                          TABLE_ID_COLUMN,
-                          PARTITION_NAME_COLUMN,
-                          STATISTIC_NAME_COLUMN,
-                          STATISTIC_VALUE_COLUMN,
-                          AUDIT_INFO_COLUMN))
-                  .withRowId(true)
-                  .batchSize(readBatchSize)
-                  .filter(filter)
-                  .build())) {
-        Map<String, List<PersistedStatistic>> partitionStatistics = Maps.newConcurrentMap();
-        try (ArrowReader reader = scanner.scanBatches()) {
-          while (reader.loadNextBatch()) {
-            VectorSchemaRoot root = reader.getVectorSchemaRoot();
-            List<FieldVector> fieldVectors = root.getFieldVectors();
-            VarCharVector partitionNameVector = (VarCharVector) fieldVectors.get(1);
-            VarCharVector statisticNameVector = (VarCharVector) fieldVectors.get(2);
-            LargeVarCharVector statisticValueVector = (LargeVarCharVector) fieldVectors.get(3);
-            LargeVarCharVector auditInfoNameVector = (LargeVarCharVector) fieldVectors.get(4);
+          for (int i = 0; i < root.getRowCount(); i++) {
+            String partitionName = new String(partitionNameVector.get(i), StandardCharsets.UTF_8);
+            String statisticName = new String(statisticNameVector.get(i), StandardCharsets.UTF_8);
+            String statisticValueStr =
+                new String(statisticValueVector.get(i), StandardCharsets.UTF_8);
+            String auditInoStr = new String(auditInfoNameVector.get(i), StandardCharsets.UTF_8);
 
-            for (int i = 0; i < root.getRowCount(); i++) {
-              String partitionName = new String(partitionNameVector.get(i), StandardCharsets.UTF_8);
-              String statisticName = new String(statisticNameVector.get(i), StandardCharsets.UTF_8);
-              String statisticValueStr =
-                  new String(statisticValueVector.get(i), StandardCharsets.UTF_8);
-              String auditInoStr = new String(auditInfoNameVector.get(i), StandardCharsets.UTF_8);
+            StatisticValue<?> statisticValue =
+                JsonUtils.anyFieldMapper().readValue(statisticValueStr, StatisticValue.class);
+            AuditInfo auditInfo =
+                JsonUtils.anyFieldMapper().readValue(auditInoStr, AuditInfo.class);
 
-              StatisticValue<?> statisticValue =
-                  JsonUtils.anyFieldMapper().readValue(statisticValueStr, StatisticValue.class);
-              AuditInfo auditInfo =
-                  JsonUtils.anyFieldMapper().readValue(auditInoStr, AuditInfo.class);
+            PersistedStatistic persistedStatistic =
+                PersistedStatistic.of(statisticName, statisticValue, auditInfo);
 
-              PersistedStatistic persistedStatistic =
-                  PersistedStatistic.of(statisticName, statisticValue, auditInfo);
-
-              partitionStatistics
-                  .computeIfAbsent(partitionName, k -> Lists.newArrayList())
-                  .add(persistedStatistic);
-            }
+            partitionStatistics
+                .computeIfAbsent(partitionName, k -> Lists.newArrayList())
+                .add(persistedStatistic);
           }
-
-          return partitionStatistics.entrySet().stream()
-              .map(entry -> PersistedPartitionStatistics.of(entry.getKey(), entry.getValue()))
-              .collect(Collectors.toList());
         }
-      } catch (Exception e) {
-        throw new RuntimeException(e);
+
+        return partitionStatistics.entrySet().stream()
+            .map(entry -> PersistedPartitionStatistics.of(entry.getKey(), entry.getValue()))
+            .collect(Collectors.toList());
       }
+    } catch (Exception e) {
+      throw new RuntimeException(e);
     }
   }
 
   private Dataset open(String fileName) {
     try {
-      return Dataset.open(fileName, allocator);
+      return Dataset.open(
+          allocator,
+          fileName,
+          new ReadOptions.Builder()
+              .setIndexCacheSize(10000000)
+              .setMetadataCacheSizeBytes(1024 * 1024 * 1024)
+              .build());
     } catch (IllegalArgumentException illegalArgumentException) {
       if (illegalArgumentException.getMessage().contains("was not found")) {
         return Dataset.create(allocator, fileName, SCHEMA, new WriteParams.Builder().build());
