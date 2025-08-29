@@ -92,7 +92,7 @@ public class LancePartitionStatisticStorage implements PartitionStatisticStorage
               Field.notNullable(PARTITION_NAME_COLUMN, new ArrowType.Utf8()),
               Field.notNullable(STATISTIC_NAME_COLUMN, new ArrowType.Utf8()),
               Field.notNullable(STATISTIC_VALUE_COLUMN, new ArrowType.LargeUtf8()),
-              Field.notNullable(AUDIT_INFO_COLUMN, new ArrowType.Utf8())));
+              Field.notNullable(AUDIT_INFO_COLUMN, new ArrowType.LargeUtf8())));
 
   private final Map<String, String> properties;
   private final String location;
@@ -197,6 +197,7 @@ public class LancePartitionStatisticStorage implements PartitionStatisticStorage
     }
   }
 
+  @SuppressWarnings("deprecation")
   private void appendStatisticsImpl(Long tableId, List<PartitionStatisticsUpdate> updates) {
     String fileName = getFilePath(tableId);
     try (Dataset datasetRead = open(fileName)) {
@@ -228,7 +229,8 @@ public class LancePartitionStatisticStorage implements PartitionStatisticStorage
                 (VarCharVector) root.getVector(STATISTIC_NAME_COLUMN);
             LargeVarCharVector statisticValueVector =
                 (LargeVarCharVector) root.getVector(STATISTIC_VALUE_COLUMN);
-            VarCharVector auditInfoVector = (VarCharVector) root.getVector(AUDIT_INFO_COLUMN);
+            LargeVarCharVector auditInfoVector =
+                (LargeVarCharVector) root.getVector(AUDIT_INFO_COLUMN);
 
             tableIdVector.set(index, tableId);
             partitionNameVector.setSafe(index, partitionName.getBytes(StandardCharsets.UTF_8));
@@ -382,7 +384,7 @@ public class LancePartitionStatisticStorage implements PartitionStatisticStorage
             VarCharVector partitionNameVector = (VarCharVector) fieldVectors.get(1);
             VarCharVector statisticNameVector = (VarCharVector) fieldVectors.get(2);
             LargeVarCharVector statisticValueVector = (LargeVarCharVector) fieldVectors.get(3);
-            VarCharVector auditInfoNameVector = (VarCharVector) fieldVectors.get(4);
+            LargeVarCharVector auditInfoNameVector = (LargeVarCharVector) fieldVectors.get(4);
 
             for (int i = 0; i < root.getRowCount(); i++) {
               String partitionName = new String(partitionNameVector.get(i), StandardCharsets.UTF_8);

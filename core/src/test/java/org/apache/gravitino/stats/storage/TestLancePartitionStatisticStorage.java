@@ -27,6 +27,7 @@ import com.google.common.collect.Maps;
 import java.io.File;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.reflect.FieldUtils;
 import org.apache.gravitino.EntityStore;
@@ -60,50 +61,63 @@ public class TestLancePartitionStatisticStorage {
     EntityStore entityStore = mock(EntityStore.class);
     TableEntity tableEntity = mock(TableEntity.class);
     when(entityStore.get(any(), any(), any())).thenReturn(tableEntity);
-    when(tableEntity.id()).thenReturn(1L);
+    when(tableEntity.id()).thenReturn(7L);
     FieldUtils.writeField(GravitinoEnv.getInstance(), "entityStore", entityStore, true);
 
-    String location = "/tmp/test";
+    int count = 10000000;
+    int partitions = 1000000;
+
+    String location = "s3://rorytest2025725/tmp/test/" + (count / partitions) + "_in_" + count;
     Map<String, String> properties = Maps.newHashMap();
     properties.put("location", location);
 
     PartitionStatisticStorage storage = factory.create(properties);
 
-    int count = 1000000;
-    int partitions = 10000;
-    long start = System.currentTimeMillis();
-    Map<MetadataObject, Map<String, Map<String, StatisticValue<?>>>> originData =
-        generateData(metadataObject, count, partitions);
-    Map<MetadataObject, List<PartitionStatisticsUpdate>> statisticsToUpdate =
-        convertData(originData);
+    boolean write = false;
+    if (write) {
+      long startWrite = System.currentTimeMillis();
+      Map<MetadataObject, Map<String, Map<String, StatisticValue<?>>>> originData =
+          generateData(metadataObject, count, partitions);
+      Map<MetadataObject, List<PartitionStatisticsUpdate>> statisticsToUpdate =
+          convertData(originData);
 
-    List<MetadataObjectStatisticsUpdate> objectUpdates = Lists.newArrayList();
-    for (Map.Entry<MetadataObject, List<PartitionStatisticsUpdate>> entry :
-        statisticsToUpdate.entrySet()) {
-      MetadataObject metadata = entry.getKey();
-      List<PartitionStatisticsUpdate> updates = entry.getValue();
-      objectUpdates.add(MetadataObjectStatisticsUpdate.of(metadata, updates));
+      List<MetadataObjectStatisticsUpdate> objectUpdates = Lists.newArrayList();
+      for (Map.Entry<MetadataObject, List<PartitionStatisticsUpdate>> entry :
+          statisticsToUpdate.entrySet()) {
+        MetadataObject metadata = entry.getKey();
+        List<PartitionStatisticsUpdate> updates = entry.getValue();
+        objectUpdates.add(MetadataObjectStatisticsUpdate.of(metadata, updates));
+      }
+      storage.updateStatistics(metalakeName, objectUpdates);
+      long endWrite = System.currentTimeMillis();
+      System.out.println(
+          "Time taken to insert 1000 statistics: " + (endWrite - startWrite) + " ms");
     }
-    storage.updateStatistics(metalakeName, objectUpdates);
-    long end = System.currentTimeMillis();
-    System.out.println("Time taken to insert 1000 statistics: " + (end - start) + " ms");
 
-    String fromPartitionName =
-        "partition" + String.format("%0" + String.valueOf(partitions).length() + "d", 0);
-    String toPartitionName =
-        "partition" + String.format("%0" + String.valueOf(partitions).length() + "d", 1);
-
-    start = System.currentTimeMillis();
-    storage.listStatistics(
-        metalakeName,
-        metadataObject,
-        PartitionRange.between(
-            fromPartitionName,
-            PartitionRange.BoundType.CLOSED,
-            toPartitionName,
-            PartitionRange.BoundType.OPEN));
-    end = System.currentTimeMillis();
-    System.out.println("Time taken to read 10 statistics: " + (end - start) + " ms");
+    for (int index = 0; index < 5; index++) {
+      int target = new Random().nextInt(partitions);
+      String fromPartitionName =
+          "partition" + String.format("%0" + String.valueOf(partitions).length() + "d", target);
+      String toPartitionName =
+          "partition" + String.format("%0" + String.valueOf(partitions).length() + "d", target + 1);
+      long start = System.currentTimeMillis();
+      List<PersistedPartitionStatistics> listedStat =
+          storage.listStatistics(
+              metalakeName,
+              metadataObject,
+              PartitionRange.between(
+                  fromPartitionName,
+                  PartitionRange.BoundType.CLOSED,
+                  toPartitionName,
+                  PartitionRange.BoundType.OPEN));
+      long end = System.currentTimeMillis();
+      System.out.println(
+          "Time taken to read "
+              + listedStat.get(0).statistics().size()
+              + " statistics: "
+              + (end - start)
+              + " ms");
+    }
 
     /*
     Assertions.assertEquals(1, listedStats.size());
@@ -220,7 +234,7 @@ public class TestLancePartitionStatisticStorage {
           "partition"
               + String.format("%0" + String.valueOf(partitions).length() + "d", index % partitions);
       StringBuilder value = new StringBuilder("value" + index);
-      for (int j = 0; j < 10; j++) {
+      for (int j = 0; j < 1; j++) {
         value.append("value").append(index);
       }
 
