@@ -429,7 +429,7 @@ public class LancePartitionStatisticStorage implements PartitionStatisticStorage
           allocator,
           fileName,
           new ReadOptions.Builder()
-              .setIndexCacheSize(10000000)
+              .setIndexCacheSizeBytes(1024 * 1024 * 1024)
               .setMetadataCacheSizeBytes(1024 * 1024 * 1024)
               .build());
     } catch (IllegalArgumentException illegalArgumentException) {
