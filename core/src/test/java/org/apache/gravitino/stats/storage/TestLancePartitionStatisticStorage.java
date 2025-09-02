@@ -94,8 +94,8 @@ public class TestLancePartitionStatisticStorage {
           "Time taken to insert 1000 statistics: " + (endWrite - startWrite) + " ms");
     }
 
-    for (int index = 0; index < 5; index++) {
-      int target = new Random().nextInt(partitions);
+    for (int index = 0; index < 20; index++) {
+      int target = new Random().nextInt(100000);
       String fromPartitionName =
           "partition" + String.format("%0" + String.valueOf(partitions).length() + "d", target);
       String toPartitionName =
@@ -111,12 +111,15 @@ public class TestLancePartitionStatisticStorage {
                   toPartitionName,
                   PartitionRange.BoundType.OPEN));
       long end = System.currentTimeMillis();
-      System.out.println(
-          "Time taken to read "
-              + listedStat.get(0).statistics().size()
-              + " statistics: "
-              + (end - start)
-              + " ms");
+      if (!listedStat.isEmpty()) {
+        System.out.println("Target partition" + target);
+        System.out.println(
+            "Time taken to read "
+                + listedStat.get(0).statistics().size()
+                + " statistics: "
+                + (end - start)
+                + " ms");
+      }
     }
 
     /*

@@ -422,6 +422,7 @@ public class LancePartitionStatisticStorage implements PartitionStatisticStorage
     }
   }
 
+  @SuppressWarnings("deprecation")
   private Dataset open(String fileName) {
     try {
       return Dataset.open(
