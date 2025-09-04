@@ -64,34 +64,44 @@ public class TestLancePartitionStatisticStorage {
     when(tableEntity.id()).thenReturn(7L);
     FieldUtils.writeField(GravitinoEnv.getInstance(), "entityStore", entityStore, true);
 
-    int count = 10000000;
-    int partitions = 1000000;
+    int count = 100000000;
+    int partitions = 10000000;
 
-    String location = "s3://rorytest2025725/tmp/test/" + (count / partitions) + "_in_" + count;
+    // String location = "s3://rorytest2025725/tmp/test/" + (count / partitions) + "_in_" + count;
+    String location = "/tmp/test/" + (count / partitions) + "_in_" + count;
     Map<String, String> properties = Maps.newHashMap();
     properties.put("location", location);
 
     PartitionStatisticStorage storage = factory.create(properties);
 
-    boolean write = false;
+    boolean write = true;
     if (write) {
-      long startWrite = System.currentTimeMillis();
-      Map<MetadataObject, Map<String, Map<String, StatisticValue<?>>>> originData =
-          generateData(metadataObject, count, partitions);
-      Map<MetadataObject, List<PartitionStatisticsUpdate>> statisticsToUpdate =
-          convertData(originData);
+      int partitionMax = 1000000;
+      int batchMax = count / partitionMax;
 
-      List<MetadataObjectStatisticsUpdate> objectUpdates = Lists.newArrayList();
-      for (Map.Entry<MetadataObject, List<PartitionStatisticsUpdate>> entry :
-          statisticsToUpdate.entrySet()) {
-        MetadataObject metadata = entry.getKey();
-        List<PartitionStatisticsUpdate> updates = entry.getValue();
-        objectUpdates.add(MetadataObjectStatisticsUpdate.of(metadata, updates));
+      for (int countIndex = 0; countIndex < batchMax; countIndex++) {
+
+        int writeRecords = Math.min(count, partitionMax);
+        count = count - writeRecords;
+
+        Map<MetadataObject, Map<String, Map<String, StatisticValue<?>>>> originData =
+            generateData(metadataObject, writeRecords, partitions, countIndex * partitionMax);
+        Map<MetadataObject, List<PartitionStatisticsUpdate>> statisticsToUpdate =
+            convertData(originData);
+
+        List<MetadataObjectStatisticsUpdate> objectUpdates = Lists.newArrayList();
+        for (Map.Entry<MetadataObject, List<PartitionStatisticsUpdate>> entry :
+            statisticsToUpdate.entrySet()) {
+          MetadataObject metadata = entry.getKey();
+          List<PartitionStatisticsUpdate> updates = entry.getValue();
+          objectUpdates.add(MetadataObjectStatisticsUpdate.of(metadata, updates));
+        }
+        long startWrite = System.currentTimeMillis();
+        storage.updateStatistics(metalakeName, objectUpdates);
+        long endWrite = System.currentTimeMillis();
+        System.out.println(
+            "Time taken to insert 1000 statistics: " + (endWrite - startWrite) + " ms");
       }
-      storage.updateStatistics(metalakeName, objectUpdates);
-      long endWrite = System.currentTimeMillis();
-      System.out.println(
-          "Time taken to insert 1000 statistics: " + (endWrite - startWrite) + " ms");
     }
 
     for (int index = 0; index < 20; index++) {
@@ -224,15 +234,15 @@ public class TestLancePartitionStatisticStorage {
       }
     }
      */
-    FileUtils.deleteDirectory(new File(location + "/" + tableEntity.id() + ".lance"));
+    // FileUtils.deleteDirectory(new File(location + "/" + tableEntity.id() + ".lance"));
     storage.close();
   }
 
   private Map<MetadataObject, Map<String, Map<String, StatisticValue<?>>>> generateData(
-      MetadataObject metadataObject, int count, int partitions) {
+      MetadataObject metadataObject, int count, int partitions, int startIndex) {
     Map<MetadataObject, Map<String, Map<String, StatisticValue<?>>>> statisticsToUpdate =
         Maps.newHashMap();
-    for (int index = 0; index < count; index++) {
+    for (int index = startIndex; index < startIndex + count; index++) {
       String partitionName =
           "partition"
               + String.format("%0" + String.valueOf(partitions).length() + "d", index % partitions);
