@@ -1,0 +1,122 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#  http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+#
+
+name: Cherry-pick to branch
+
+on:
+  workflow_call:
+    inputs:
+      target-branch:
+        description: 'Target branch to cherry-pick to'
+        required: true
+        type: string
+      commit-sha:
+        description: 'Commit SHA to cherry-pick'
+        required: true
+        type: string
+      pr-number:
+        description: 'Original PR number'
+        required: true
+        type: string
+
+jobs:
+  cherry-pick:
+    runs-on: ubuntu-latest
+    name: Cherry-pick to ${{ inputs.target-branch }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Cherry-pick commit
+        id: cherry-pick
+        run: |
+          # Fetch all branches
+          git fetch origin
+          
+          # Checkout target branch
+          git checkout ${{ inputs.target-branch }}
+          
+          # Create a new branch for the cherry-pick
+          BRANCH_NAME="cherry-pick-${{ inputs.pr-number }}-to-${{ inputs.target-branch }}"
+          git checkout -b $BRANCH_NAME
+          
+          # Cherry-pick the commit
+          if git cherry-pick ${{ inputs.commit-sha }}; then
+            echo "Cherry-pick successful"
+            echo "success=true" >> $GITHUB_OUTPUT
+            echo "branch-name=$BRANCH_NAME" >> $GITHUB_OUTPUT
+          else
+            echo "Cherry-pick failed, creating conflict PR"
+            echo "success=false" >> $GITHUB_OUTPUT
+            echo "branch-name=$BRANCH_NAME" >> $GITHUB_OUTPUT
+            
+            # Add all files (including conflicts)
+            git add .
+            git commit --no-edit || git commit -m "Cherry-pick #${{ inputs.pr-number }} to ${{ inputs.target-branch }} (with conflicts)"
+          fi
+
+      - name: Push branch
+        if: steps.cherry-pick.outputs.branch-name != ''
+        run: |
+          git push origin ${{ steps.cherry-pick.outputs.branch-name }}
+
+      - name: Create Pull Request
+        if: steps.cherry-pick.outputs.branch-name != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TITLE="[Cherry-pick] PR #${{ inputs.pr-number }} to ${{ inputs.target-branch }}"
+          
+          if [ "${{ steps.cherry-pick.outputs.success }}" = "true" ]; then
+            BODY=$(cat <<EOF
+          Automatic cherry-pick of #${{ inputs.pr-number }} to \`${{ inputs.target-branch }}\`
+
+          Original commit: ${{ inputs.commit-sha }}
+
+          This cherry-pick was successful and is ready for review.
+          EOF
+          )
+          else
+            BODY=$(cat <<EOF
+          Automatic cherry-pick of #${{ inputs.pr-number }} to \`${{ inputs.target-branch }}\`
+
+          Original commit: ${{ inputs.commit-sha }}
+
+          ⚠️ **This cherry-pick has conflicts that need to be resolved manually.**
+
+          Please review and resolve the conflicts before merging.
+          EOF
+          )
+          fi
+          
+          gh pr create \
+            --title "$TITLE" \
+            --body "$BODY" \
+            --base ${{ inputs.target-branch }} \
+            --head ${{ steps.cherry-pick.outputs.branch-name }} \
+            --label cherry-pick \
+            --reviewer jerryshao || echo "Failed to create PR, may already exist"
