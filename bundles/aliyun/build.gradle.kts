@@ -59,6 +59,8 @@ dependencies {
   // https://www.alibabacloud.com/help/en/oss/developer-reference/java-installation?spm=a2c63.p38356.0.i1
   implementation(libs.sun.activation)
 
+  compileOnly(libs.lombok)
+
   testImplementation(project(":api"))
   testImplementation(project(":core"))
   testImplementation(project(":common"))
