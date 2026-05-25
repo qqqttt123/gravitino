@@ -22,17 +22,23 @@ package org.apache.gravitino.iceberg.service.dispatcher;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import javax.annotation.Nullable;
 import org.apache.gravitino.Entity;
 import org.apache.gravitino.NameIdentifier;
 import org.apache.gravitino.auth.AuthConstants;
 import org.apache.gravitino.catalog.lakehouse.iceberg.IcebergConstants;
 import org.apache.gravitino.credential.CredentialPrivilege;
+import org.apache.gravitino.iceberg.common.IcebergConfig;
+import org.apache.gravitino.iceberg.common.ops.IcebergCatalogWrapper;
 import org.apache.gravitino.iceberg.common.utils.IcebergIdentifierUtils;
 import org.apache.gravitino.iceberg.service.IcebergCatalogWrapperManager;
 import org.apache.gravitino.iceberg.service.authorization.IcebergRESTServerContext;
+import org.apache.gravitino.iceberg.service.purge.IcebergPurgeJob;
+import org.apache.gravitino.iceberg.service.purge.IcebergPurgeJobStore;
 import org.apache.gravitino.listener.api.event.IcebergRequestContext;
 import org.apache.gravitino.server.authorization.MetadataAuthzHelper;
 import org.apache.gravitino.server.authorization.expression.AuthorizationExpressionConstants;
+import org.apache.iceberg.TableMetadata;
 import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.rest.requests.CreateTableRequest;
@@ -50,10 +56,31 @@ public class IcebergTableOperationExecutor implements IcebergTableOperationDispa
 
   private static final Logger LOG = LoggerFactory.getLogger(IcebergTableOperationExecutor.class);
 
-  private IcebergCatalogWrapperManager icebergCatalogWrapperManager;
+  private static final String ASYNC_PURGE_HEADER = "X-Gravitino-Async-Purge";
+  private static final String DEFAULT_FILE_IO_IMPL = "org.apache.iceberg.io.ResolvingFileIO";
+
+  private final IcebergCatalogWrapperManager icebergCatalogWrapperManager;
+  @Nullable private final IcebergPurgeJobStore purgeJobStore;
+  private final int purgeMaxAttempts;
 
   public IcebergTableOperationExecutor(IcebergCatalogWrapperManager icebergCatalogWrapperManager) {
+    this(icebergCatalogWrapperManager, null, 0);
+  }
+
+  /**
+   * Creates an executor wired for async hard deletion.
+   *
+   * @param icebergCatalogWrapperManager the catalog wrapper manager
+   * @param purgeJobStore the purge job store, or {@code null} to always purge synchronously
+   * @param purgeMaxAttempts the {@code max_attempts} stamped onto enqueued purge jobs
+   */
+  public IcebergTableOperationExecutor(
+      IcebergCatalogWrapperManager icebergCatalogWrapperManager,
+      @Nullable IcebergPurgeJobStore purgeJobStore,
+      int purgeMaxAttempts) {
     this.icebergCatalogWrapperManager = icebergCatalogWrapperManager;
+    this.purgeJobStore = purgeJobStore;
+    this.purgeMaxAttempts = purgeMaxAttempts;
   }
 
   @Override
@@ -109,15 +136,56 @@ public class IcebergTableOperationExecutor implements IcebergTableOperationDispa
   @Override
   public void dropTable(
       IcebergRequestContext context, TableIdentifier tableIdentifier, boolean purgeRequested) {
-    if (purgeRequested) {
-      icebergCatalogWrapperManager
-          .getCatalogWrapper(context.catalogName())
-          .purgeTable(tableIdentifier);
-    } else {
-      icebergCatalogWrapperManager
-          .getCatalogWrapper(context.catalogName())
-          .dropTable(tableIdentifier);
+    IcebergCatalogWrapper wrapper =
+        icebergCatalogWrapperManager.getCatalogWrapper(context.catalogName());
+    if (!purgeRequested) {
+      wrapper.dropTable(tableIdentifier);
+      return;
     }
+
+    if (purgeJobStore == null || !asyncPurgeRequested(context)) {
+      // Synchronous fallback: delete files on the request thread, today's behavior.
+      wrapper.purgeTable(tableIdentifier);
+      return;
+    }
+
+    // Async path: capture the metadata location, drop the catalog entry, then enqueue a job that
+    // exists only for a table already gone from the catalog.
+    TableMetadata metadata = wrapper.loadTable(tableIdentifier).tableMetadata();
+    String metadataLocation = metadata.metadataFileLocation();
+    IcebergConfig catalogConfig = wrapper.getIcebergConfig();
+    String fileIoImpl = catalogConfig.get(IcebergConfig.IO_IMPL);
+    if (fileIoImpl == null) {
+      fileIoImpl = DEFAULT_FILE_IO_IMPL;
+    }
+
+    wrapper.dropTable(tableIdentifier);
+    purgeJobStore.enqueue(
+        IcebergPurgeJob.builder()
+            .metalakeName(IcebergRESTServerContext.getInstance().metalakeName())
+            .catalogName(context.catalogName())
+            .namespace(tableIdentifier.namespace().toString())
+            .objectName(tableIdentifier.name())
+            .objectType(IcebergPurgeJob.TABLE)
+            .metadataLocation(metadataLocation)
+            .fileIoImpl(fileIoImpl)
+            .fileIoProps(catalogConfig.getIcebergCatalogProperties())
+            .maxAttempts(purgeMaxAttempts)
+            .createdBy(context.userName())
+            .build());
+    LOG.info("Enqueued async purge job for table {}", tableIdentifier);
+  }
+
+  // Async is the default; a client opts into synchronous deletion with the
+  // `X-Gravitino-Async-Purge: false` request header (a Gravitino extension, not part of the
+  // Iceberg REST spec).
+  private boolean asyncPurgeRequested(IcebergRequestContext context) {
+    for (Map.Entry<String, String> header : context.httpHeaders().entrySet()) {
+      if (ASYNC_PURGE_HEADER.equalsIgnoreCase(header.getKey())) {
+        return !"false".equalsIgnoreCase(header.getValue());
+      }
+    }
+    return true;
   }
 
   @Override

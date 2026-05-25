@@ -112,6 +112,102 @@ public class IcebergConfig extends Config implements OverwriteDefaultConfig {
           .stringConf()
           .create();
 
+  // Async hard-deletion (purge) configuration. When `async-purge.jdbc-url` is set, a
+  // `DELETE ...?purgeRequested=true` returns immediately and the files are deleted in the
+  // background; a client opts back into synchronous deletion with `X-Gravitino-Async-Purge: false`.
+  public static final ConfigEntry<String> ASYNC_PURGE_JDBC_URL =
+      new ConfigBuilder("async-purge.jdbc-url")
+          .doc(
+              "JDBC URL of the database holding the iceberg_purge_job table; async purge is "
+                  + "enabled only when this is set")
+          .version(ConfigConstants.VERSION_1_3_0)
+          .stringConf()
+          .create();
+
+  public static final ConfigEntry<String> ASYNC_PURGE_JDBC_USER =
+      new ConfigBuilder("async-purge.jdbc-user")
+          .doc("JDBC user for the async purge job table")
+          .version(ConfigConstants.VERSION_1_3_0)
+          .stringConf()
+          .createWithDefault("");
+
+  public static final ConfigEntry<String> ASYNC_PURGE_JDBC_PASSWORD =
+      new ConfigBuilder("async-purge.jdbc-password")
+          .doc("JDBC password for the async purge job table")
+          .version(ConfigConstants.VERSION_1_3_0)
+          .stringConf()
+          .createWithDefault("");
+
+  public static final ConfigEntry<String> ASYNC_PURGE_JDBC_DRIVER =
+      new ConfigBuilder("async-purge.jdbc-driver")
+          .doc("JDBC driver class for the async purge job table")
+          .version(ConfigConstants.VERSION_1_3_0)
+          .stringConf()
+          .createWithDefault("com.mysql.cj.jdbc.Driver");
+
+  public static final ConfigEntry<Integer> ASYNC_PURGE_WORKER_THREADS =
+      new ConfigBuilder("async-purge.worker-threads")
+          .doc("Worker pool size per server for async purge")
+          .version(ConfigConstants.VERSION_1_3_0)
+          .intConf()
+          .createWithDefault(4);
+
+  public static final ConfigEntry<Integer> ASYNC_PURGE_DELETE_THREADS =
+      new ConfigBuilder("async-purge.delete-threads")
+          .doc("Parallelism of file deletes shared across purge jobs")
+          .version(ConfigConstants.VERSION_1_3_0)
+          .intConf()
+          .createWithDefault(8);
+
+  public static final ConfigEntry<Long> ASYNC_PURGE_POLL_INTERVAL_MS =
+      new ConfigBuilder("async-purge.poll-interval-ms")
+          .doc("Worker poll interval in milliseconds")
+          .version(ConfigConstants.VERSION_1_3_0)
+          .longConf()
+          .createWithDefault(5000L);
+
+  public static final ConfigEntry<Integer> ASYNC_PURGE_BATCH_SIZE =
+      new ConfigBuilder("async-purge.batch-size")
+          .doc("Number of jobs claimed per worker tick")
+          .version(ConfigConstants.VERSION_1_3_0)
+          .intConf()
+          .createWithDefault(16);
+
+  public static final ConfigEntry<Long> ASYNC_PURGE_HEARTBEAT_TIMEOUT_MS =
+      new ConfigBuilder("async-purge.heartbeat-timeout-ms")
+          .doc("Age after which a job with no heartbeat is reclaimable, in milliseconds")
+          .version(ConfigConstants.VERSION_1_3_0)
+          .longConf()
+          .createWithDefault(300000L);
+
+  public static final ConfigEntry<Integer> ASYNC_PURGE_MAX_ATTEMPTS =
+      new ConfigBuilder("async-purge.max-attempts")
+          .doc("Attempts before a purge job is marked FAILED")
+          .version(ConfigConstants.VERSION_1_3_0)
+          .intConf()
+          .createWithDefault(5);
+
+  public static final ConfigEntry<Long> ASYNC_PURGE_BACKOFF_BASE_MS =
+      new ConfigBuilder("async-purge.backoff-base-ms")
+          .doc("Exponential backoff base in milliseconds")
+          .version(ConfigConstants.VERSION_1_3_0)
+          .longConf()
+          .createWithDefault(30000L);
+
+  public static final ConfigEntry<Long> ASYNC_PURGE_BACKOFF_MAX_MS =
+      new ConfigBuilder("async-purge.backoff-max-ms")
+          .doc("Exponential backoff ceiling in milliseconds")
+          .version(ConfigConstants.VERSION_1_3_0)
+          .longConf()
+          .createWithDefault(3600000L);
+
+  public static final ConfigEntry<Integer> ASYNC_PURGE_PER_FILE_RETRIES =
+      new ConfigBuilder("async-purge.per-file-retries")
+          .doc("Retries for a single file delete within a purge job")
+          .version(ConfigConstants.VERSION_1_3_0)
+          .intConf()
+          .createWithDefault(3);
+
   public static final ConfigEntry<String> S3_ENDPOINT =
       new ConfigBuilder(S3Properties.GRAVITINO_S3_ENDPOINT)
           .doc(

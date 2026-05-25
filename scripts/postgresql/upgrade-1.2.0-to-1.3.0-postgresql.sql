@@ -151,3 +151,31 @@ COMMENT ON COLUMN idp_group_user_rel.user_id IS 'idp user id';
 COMMENT ON COLUMN idp_group_user_rel.current_version IS 'idp relation current version';
 COMMENT ON COLUMN idp_group_user_rel.last_version IS 'idp relation last version';
 COMMENT ON COLUMN idp_group_user_rel.deleted_at IS 'idp relation deleted at';
+
+CREATE TABLE IF NOT EXISTS iceberg_purge_job (
+    id BIGSERIAL PRIMARY KEY,
+    metalake_name VARCHAR(128) NOT NULL,
+    catalog_name VARCHAR(128) NOT NULL,
+    namespace VARCHAR(512) NOT NULL,
+    object_name VARCHAR(256) NOT NULL,
+    object_type VARCHAR(16) NOT NULL,
+    metadata_location VARCHAR(1024) NOT NULL,
+    file_io_impl VARCHAR(256) NOT NULL,
+    file_io_props TEXT NOT NULL,
+    state VARCHAR(16) NOT NULL,
+    attempts INT NOT NULL DEFAULT 0,
+    max_attempts INT NOT NULL,
+    last_error TEXT,
+    heartbeat_at BIGINT,
+    next_attempt_at BIGINT NOT NULL,
+    created_at BIGINT NOT NULL,
+    created_by VARCHAR(128) NOT NULL,
+    updated_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_state_next_attempt ON iceberg_purge_job(state, next_attempt_at);
+CREATE INDEX IF NOT EXISTS idx_object ON iceberg_purge_job(catalog_name, namespace, object_name, state);
+COMMENT ON TABLE iceberg_purge_job IS 'Async hard-deletion (purge) jobs for the Iceberg REST server';
+COMMENT ON COLUMN iceberg_purge_job.metadata_location IS 'metadata.json location to rebuild the file set';
+COMMENT ON COLUMN iceberg_purge_job.state IS 'PENDING | RUNNING | SUCCEEDED | FAILED | CANCELLED';
+COMMENT ON COLUMN iceberg_purge_job.heartbeat_at IS 'last heartbeat from the processing worker; NULL when unclaimed';
+COMMENT ON COLUMN iceberg_purge_job.next_attempt_at IS 'earliest time the job may be claimed, in millis';

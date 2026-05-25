@@ -100,3 +100,27 @@ CREATE TABLE IF NOT EXISTS `idp_group_user_rel` (
     KEY `idx_iug_gid` (`group_id`),
     KEY `idx_iug_uid` (`user_id`)
 ) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS `iceberg_purge_job` (
+  `id`                BIGINT(20)    UNSIGNED NOT NULL AUTO_INCREMENT COMMENT 'auto increment id',
+  `metalake_name`     VARCHAR(128)  NOT NULL COMMENT 'metalake name',
+  `catalog_name`      VARCHAR(128)  NOT NULL COMMENT 'iceberg catalog name',
+  `namespace`         VARCHAR(512)  NOT NULL COMMENT 'table namespace',
+  `object_name`       VARCHAR(256)  NOT NULL COMMENT 'table or view name',
+  `object_type`       VARCHAR(16)   NOT NULL COMMENT 'TABLE | VIEW',
+  `metadata_location` VARCHAR(1024) NOT NULL COMMENT 'metadata.json location to rebuild the file set',
+  `file_io_impl`      VARCHAR(256)  NOT NULL COMMENT 'FileIO implementation class',
+  `file_io_props`     CLOB          NOT NULL COMMENT 'FileIO properties as JSON',
+  `state`             VARCHAR(16)   NOT NULL COMMENT 'PENDING | RUNNING | SUCCEEDED | FAILED | CANCELLED',
+  `attempts`          INT(10)       NOT NULL DEFAULT 0 COMMENT 'number of attempts so far',
+  `max_attempts`      INT(10)       NOT NULL COMMENT 'attempts before the job is marked FAILED',
+  `last_error`        CLOB          NULL COMMENT 'last error message',
+  `heartbeat_at`      BIGINT(20)    NULL COMMENT 'last heartbeat from the processing worker; NULL when unclaimed',
+  `next_attempt_at`   BIGINT(20)    NOT NULL COMMENT 'earliest time the job may be claimed, in millis',
+  `created_at`        BIGINT(20)    NOT NULL COMMENT 'create time in millis',
+  `created_by`        VARCHAR(128)  NOT NULL COMMENT 'user who requested the drop',
+  `updated_at`        BIGINT(20)    NOT NULL COMMENT 'last update time in millis',
+  PRIMARY KEY (`id`),
+  KEY `idx_state_next_attempt` (`state`, `next_attempt_at`),
+  KEY `idx_object` (`catalog_name`, `namespace`, `object_name`, `state`)
+) ENGINE=InnoDB COMMENT='Async hard-deletion (purge) jobs for the Iceberg REST server';

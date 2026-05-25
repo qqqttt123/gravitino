@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 import javax.inject.Singleton;
 import javax.servlet.Servlet;
+import org.apache.commons.dbcp2.BasicDataSource;
 import org.apache.gravitino.Configs;
 import org.apache.gravitino.GravitinoEnv;
 import org.apache.gravitino.auxiliary.GravitinoAuxiliaryService;
@@ -47,6 +48,9 @@ import org.apache.gravitino.iceberg.service.dispatcher.IcebergViewOperationExecu
 import org.apache.gravitino.iceberg.service.metrics.IcebergMetricsManager;
 import org.apache.gravitino.iceberg.service.provider.IcebergConfigProvider;
 import org.apache.gravitino.iceberg.service.provider.IcebergConfigProviderFactory;
+import org.apache.gravitino.iceberg.service.purge.IcebergPurgeJobStore;
+import org.apache.gravitino.iceberg.service.purge.IcebergPurgeJobStoreFactory;
+import org.apache.gravitino.iceberg.service.purge.IcebergPurgeWorker;
 import org.apache.gravitino.listener.EventBus;
 import org.apache.gravitino.metrics.MetricsSystem;
 import org.apache.gravitino.metrics.source.MetricsSource;
@@ -77,6 +81,8 @@ public class RESTService implements GravitinoAuxiliaryService {
   private IcebergCatalogWrapperManager icebergCatalogWrapperManager;
   private IcebergMetricsManager icebergMetricsManager;
   private IcebergConfigProvider configProvider;
+  private IcebergPurgeWorker icebergPurgeWorker;
+  private BasicDataSource purgeDataSource;
   private boolean auxMode;
 
   private void initServer(IcebergConfig icebergConfig) {
@@ -119,9 +125,22 @@ public class RESTService implements GravitinoAuxiliaryService {
             skipAuthorizationForRestBackend,
             icebergCatalogWrapperManager);
     this.icebergMetricsManager = new IcebergMetricsManager(icebergConfig);
+
+    // Async hard deletion: when configured, drops enqueue a job that a background worker drains.
+    IcebergPurgeJobStore purgeJobStore = null;
+    if (IcebergPurgeJobStoreFactory.isEnabled(icebergConfig)) {
+      this.purgeDataSource = IcebergPurgeJobStoreFactory.createDataSource(icebergConfig);
+      purgeJobStore = new IcebergPurgeJobStore(purgeDataSource);
+      this.icebergPurgeWorker = new IcebergPurgeWorker(purgeJobStore, icebergConfig);
+      LOG.info("Async Iceberg purge enabled");
+    }
+
     // Table: HookDispatcher -> EventDispatcher -> OperationExecutor
     IcebergTableOperationDispatcher icebergTableOperationDispatcher =
-        new IcebergTableOperationExecutor(icebergCatalogWrapperManager);
+        new IcebergTableOperationExecutor(
+            icebergCatalogWrapperManager,
+            purgeJobStore,
+            icebergConfig.get(IcebergConfig.ASYNC_PURGE_MAX_ATTEMPTS));
     IcebergTableOperationDispatcher icebergTableEventDispatcher =
         new IcebergTableEventDispatcher(icebergTableOperationDispatcher, eventBus, metalakeName);
     if (authorizationContext.isAuthorizationEnabled()) {
@@ -198,6 +217,9 @@ public class RESTService implements GravitinoAuxiliaryService {
   @Override
   public void serviceStart() {
     icebergMetricsManager.start();
+    if (icebergPurgeWorker != null) {
+      icebergPurgeWorker.start();
+    }
     if (server != null) {
       try {
         server.start();
@@ -222,6 +244,12 @@ public class RESTService implements GravitinoAuxiliaryService {
     }
     if (icebergMetricsManager != null) {
       icebergMetricsManager.close();
+    }
+    if (icebergPurgeWorker != null) {
+      icebergPurgeWorker.close();
+    }
+    if (purgeDataSource != null) {
+      purgeDataSource.close();
     }
   }
 
