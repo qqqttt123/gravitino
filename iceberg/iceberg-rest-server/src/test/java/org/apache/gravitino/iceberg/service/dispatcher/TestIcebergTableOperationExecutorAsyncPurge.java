@@ -18,7 +18,10 @@
  */
 package org.apache.gravitino.iceberg.service.dispatcher;
 
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -38,10 +41,14 @@ import org.apache.gravitino.iceberg.service.provider.IcebergConfigProvider;
 import org.apache.gravitino.iceberg.service.purge.IcebergPurgeJob;
 import org.apache.gravitino.iceberg.service.purge.IcebergPurgeJobStore;
 import org.apache.gravitino.listener.api.event.IcebergRequestContext;
+import org.apache.iceberg.Schema;
 import org.apache.iceberg.TableMetadata;
 import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.catalog.TableIdentifier;
+import org.apache.iceberg.exceptions.AlreadyExistsException;
+import org.apache.iceberg.rest.requests.CreateTableRequest;
 import org.apache.iceberg.rest.responses.LoadTableResponse;
+import org.apache.iceberg.types.Types;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -51,6 +58,8 @@ class TestIcebergTableOperationExecutorAsyncPurge {
   private static final String CATALOG = "cat";
   private static final String ASYNC_PURGE_HEADER = "X-Gravitino-Async-Purge";
   private static final TableIdentifier TABLE = TableIdentifier.of(Namespace.of("db"), "t");
+  private static final Schema SCHEMA =
+      new Schema(Types.NestedField.required(1, "id", Types.IntegerType.get()));
 
   private IcebergCatalogWrapperManager wrapperManager;
   private CatalogWrapperForREST wrapper;
@@ -130,6 +139,36 @@ class TestIcebergTableOperationExecutorAsyncPurge {
     executor.dropTable(context, TABLE, true);
 
     verify(wrapper).purgeTable(TABLE);
+  }
+
+  @Test
+  void testCreateTableRejectedWhilePurgeActive() {
+    when(store.findActiveJobId(CATALOG, "db", "t")).thenReturn(123L);
+    IcebergTableOperationExecutor executor =
+        new IcebergTableOperationExecutor(wrapperManager, store, 5);
+    CreateTableRequest request =
+        CreateTableRequest.builder().withName("t").withSchema(SCHEMA).build();
+
+    assertThrows(
+        AlreadyExistsException.class,
+        () -> executor.createTable(context, Namespace.of("db"), request));
+    verify(wrapper, never()).createTable(any(), any(), anyBoolean());
+  }
+
+  @Test
+  void testCreateTableProceedsWhenNoActivePurge() {
+    when(store.findActiveJobId(CATALOG, "db", "t")).thenReturn(null);
+    LoadTableResponse created = mock(LoadTableResponse.class);
+    when(wrapper.createTable(eq(Namespace.of("db")), any(CreateTableRequest.class), anyBoolean()))
+        .thenReturn(created);
+    IcebergTableOperationExecutor executor =
+        new IcebergTableOperationExecutor(wrapperManager, store, 5);
+    CreateTableRequest request =
+        CreateTableRequest.builder().withName("t").withSchema(SCHEMA).build();
+
+    executor.createTable(context, Namespace.of("db"), request);
+    verify(wrapper)
+        .createTable(eq(Namespace.of("db")), any(CreateTableRequest.class), anyBoolean());
   }
 
   @Test

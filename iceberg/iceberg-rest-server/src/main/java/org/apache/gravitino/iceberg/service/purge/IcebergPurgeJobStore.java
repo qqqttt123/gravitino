@@ -62,6 +62,13 @@ public class IcebergPurgeJobStore {
   private static final String SELECT_BY_ID_SQL =
       "SELECT id, " + COLUMNS + " FROM iceberg_purge_job WHERE id = ?";
 
+  // A non-terminal job (PENDING or RUNNING) keeps the identifier occupied even though its catalog
+  // entry is already dropped; SUCCEEDED / FAILED / CANCELLED no longer block reuse.
+  private static final String SELECT_ACTIVE_ID_SQL =
+      "SELECT id FROM iceberg_purge_job "
+          + "WHERE catalog_name = ? AND namespace = ? AND object_name = ? "
+          + "AND state IN ('PENDING', 'RUNNING') ORDER BY id LIMIT 1";
+
   // A job is claimable when it is PENDING, or RUNNING but its heartbeat has gone stale.
   private static final String CLAIMABLE_PREDICATE =
       "(state = 'PENDING' OR (state = 'RUNNING' "
@@ -139,6 +146,30 @@ public class IcebergPurgeJobStore {
       }
     } catch (SQLException e) {
       throw new GravitinoRuntimeException(e, "Failed to enqueue purge job");
+    }
+  }
+
+  /**
+   * Returns the id of an active (PENDING or RUNNING) purge job for the identifier, or {@code null}
+   * if none. Used as the name-reuse tombstone: while such a job exists the files are not yet
+   * deleted, so a {@code createTable} at the same identifier must be rejected.
+   *
+   * @param catalogName the catalog name
+   * @param namespace the table namespace
+   * @param objectName the table name
+   * @return the blocking job id, or {@code null} if the identifier is free
+   */
+  public Long findActiveJobId(String catalogName, String namespace, String objectName) {
+    try (Connection conn = dataSource.getConnection();
+        PreparedStatement stmt = conn.prepareStatement(SELECT_ACTIVE_ID_SQL)) {
+      stmt.setString(1, catalogName);
+      stmt.setString(2, namespace);
+      stmt.setString(3, objectName);
+      try (ResultSet rs = stmt.executeQuery()) {
+        return rs.next() ? rs.getLong(1) : null;
+      }
+    } catch (SQLException e) {
+      throw new GravitinoRuntimeException(e, "Failed to look up active purge job");
     }
   }
 

@@ -202,6 +202,25 @@ class TestIcebergPurgeJobStore {
   }
 
   @Test
+  void testFindActiveJobId() {
+    long id = store.enqueue(sampleJob());
+
+    // PENDING is active.
+    assertEquals(Long.valueOf(id), store.findActiveJobId("cat", "db", "t"));
+    // Different identifier is free.
+    assertNull(store.findActiveJobId("cat", "db", "other"));
+
+    // RUNNING is still active.
+    long now = System.currentTimeMillis();
+    store.claim(id, now, now - TIMEOUT_MS);
+    assertEquals(Long.valueOf(id), store.findActiveJobId("cat", "db", "t"));
+
+    // Terminal states no longer block reuse.
+    store.markSucceeded(id);
+    assertNull(store.findActiveJobId("cat", "db", "t"));
+  }
+
+  @Test
   void testHeartbeatRefreshesTimestamp() {
     long id = store.enqueue(sampleJob());
     long now = System.currentTimeMillis();

@@ -41,6 +41,7 @@ import org.apache.gravitino.server.authorization.expression.AuthorizationExpress
 import org.apache.iceberg.TableMetadata;
 import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.catalog.TableIdentifier;
+import org.apache.iceberg.exceptions.AlreadyExistsException;
 import org.apache.iceberg.rest.requests.CreateTableRequest;
 import org.apache.iceberg.rest.requests.PlanTableScanRequest;
 import org.apache.iceberg.rest.requests.RenameTableRequest;
@@ -86,6 +87,19 @@ public class IcebergTableOperationExecutor implements IcebergTableOperationDispa
   @Override
   public LoadTableResponse createTable(
       IcebergRequestContext context, Namespace namespace, CreateTableRequest createTableRequest) {
+    // Name-reuse tombstone (design §5.13): while a purge job for this identifier is still active,
+    // its files are not yet deleted, so recreating the same table is rejected with 409 Conflict.
+    if (purgeJobStore != null) {
+      Long jobId =
+          purgeJobStore.findActiveJobId(
+              context.catalogName(), namespace.toString(), createTableRequest.name());
+      if (jobId != null) {
+        throw new AlreadyExistsException(
+            "Cannot create table %s.%s: it is being purged (cleanup job %d still in progress)",
+            namespace, createTableRequest.name(), jobId);
+      }
+    }
+
     String authenticatedUser = context.userName();
     if (!AuthConstants.ANONYMOUS_USER.equals(authenticatedUser)) {
       String existingOwner = createTableRequest.properties().get(IcebergConstants.OWNER);
