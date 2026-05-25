@@ -112,39 +112,12 @@ public class IcebergConfig extends Config implements OverwriteDefaultConfig {
           .stringConf()
           .create();
 
-  // Async hard-deletion (purge) configuration. When `async-purge.jdbc-url` is set, a
-  // `DELETE ...?purgeRequested=true` returns immediately and the files are deleted in the
-  // background; a client opts back into synchronous deletion with `X-Gravitino-Async-Purge: false`.
-  public static final ConfigEntry<String> ASYNC_PURGE_JDBC_URL =
-      new ConfigBuilder("async-purge.jdbc-url")
-          .doc(
-              "JDBC URL of the database holding the iceberg_purge_job table; async purge is "
-                  + "enabled only when this is set")
-          .version(ConfigConstants.VERSION_1_3_0)
-          .stringConf()
-          .create();
-
-  public static final ConfigEntry<String> ASYNC_PURGE_JDBC_USER =
-      new ConfigBuilder("async-purge.jdbc-user")
-          .doc("JDBC user for the async purge job table")
-          .version(ConfigConstants.VERSION_1_3_0)
-          .stringConf()
-          .createWithDefault("");
-
-  public static final ConfigEntry<String> ASYNC_PURGE_JDBC_PASSWORD =
-      new ConfigBuilder("async-purge.jdbc-password")
-          .doc("JDBC password for the async purge job table")
-          .version(ConfigConstants.VERSION_1_3_0)
-          .stringConf()
-          .createWithDefault("");
-
-  public static final ConfigEntry<String> ASYNC_PURGE_JDBC_DRIVER =
-      new ConfigBuilder("async-purge.jdbc-driver")
-          .doc("JDBC driver class for the async purge job table")
-          .version(ConfigConstants.VERSION_1_3_0)
-          .stringConf()
-          .createWithDefault("com.mysql.cj.jdbc.Driver");
-
+  // Async hard-deletion (purge) configuration. The iceberg_purge_job table lives in Gravitino's
+  // relational metastore (the entity store), so the connection is reused from the entity-store
+  // config rather than configured separately; async purge is enabled whenever that relational
+  // backend is available. A `DELETE ...?purgeRequested=true` then returns immediately and the
+  // files are deleted in the background; a client opts back into synchronous deletion with
+  // `X-Gravitino-Async-Purge: false`. The keys below only tune the worker pool and retries.
   public static final ConfigEntry<Integer> ASYNC_PURGE_WORKER_THREADS =
       new ConfigBuilder("async-purge.worker-threads")
           .doc("Worker pool size per server for async purge")

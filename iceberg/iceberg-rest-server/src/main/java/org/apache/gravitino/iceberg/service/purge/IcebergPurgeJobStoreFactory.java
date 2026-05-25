@@ -18,45 +18,60 @@
  */
 package org.apache.gravitino.iceberg.service.purge;
 
-import org.apache.commons.dbcp2.BasicDataSource;
-import org.apache.gravitino.iceberg.common.IcebergConfig;
-import org.apache.gravitino.utils.jdbc.JdbcDataSourceConfig;
-import org.apache.gravitino.utils.jdbc.JdbcDataSourceFactory;
+import javax.sql.DataSource;
+import org.apache.gravitino.Config;
+import org.apache.gravitino.Configs;
+import org.apache.gravitino.GravitinoEnv;
+import org.apache.gravitino.storage.relational.session.SqlSessionFactoryHelper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-/** Builds the pooled {@link BasicDataSource} backing the {@link IcebergPurgeJobStore}. */
+/**
+ * Resolves the {@link DataSource} backing the {@link IcebergPurgeJobStore}. The {@code
+ * iceberg_purge_job} table lives in Gravitino's relational metastore, so this reuses the entity
+ * store's existing connection pool rather than opening a second one. Async purge is therefore
+ * available exactly when the relational JDBC backend is initialized (e.g. the Iceberg REST server
+ * running embedded in Gravitino), and silently disabled otherwise (e.g. standalone with no
+ * metastore).
+ */
 public final class IcebergPurgeJobStoreFactory {
+
+  private static final Logger LOG = LoggerFactory.getLogger(IcebergPurgeJobStoreFactory.class);
 
   private IcebergPurgeJobStoreFactory() {}
 
   /**
-   * Returns whether async purge is configured (its JDBC URL is set).
+   * Returns whether async purge can run, i.e. the relational metastore DataSource is available.
    *
-   * @param config the Iceberg REST server config
    * @return true if async purge should be enabled
    */
-  public static boolean isEnabled(IcebergConfig config) {
-    String url = config.get(IcebergConfig.ASYNC_PURGE_JDBC_URL);
-    return url != null && !url.trim().isEmpty();
+  public static boolean isEnabled() {
+    return sharedDataSource() != null;
   }
 
   /**
-   * Creates a data source for the purge job table from config.
+   * Returns the entity store's shared relational DataSource, or {@code null} when no relational
+   * backend is initialized. The returned DataSource is owned by the entity store; callers must not
+   * close it.
    *
-   * @param config the Iceberg REST server config
-   * @return a pooled data source the caller must close on shutdown
+   * @return the shared DataSource, or {@code null}
    */
-  public static BasicDataSource createDataSource(IcebergConfig config) {
-    JdbcDataSourceConfig dataSourceConfig =
-        new JdbcDataSourceConfig(
-            config.get(IcebergConfig.ASYNC_PURGE_JDBC_URL),
-            config.get(IcebergConfig.ASYNC_PURGE_JDBC_USER),
-            config.get(IcebergConfig.ASYNC_PURGE_JDBC_PASSWORD),
-            config.get(IcebergConfig.ASYNC_PURGE_JDBC_DRIVER),
-            JdbcDataSourceFactory.DEFAULT_MAX_TOTAL,
-            JdbcDataSourceFactory.DEFAULT_MIN_IDLE,
-            JdbcDataSourceFactory.DEFAULT_MAX_WAIT_MILLIS,
-            JdbcDataSourceFactory.DEFAULT_TEST_ON_BORROW,
-            JdbcDataSourceFactory.DEFAULT_VALIDATION_QUERY);
-    return JdbcDataSourceFactory.create(dataSourceConfig);
+  public static DataSource sharedDataSource() {
+    Config config = GravitinoEnv.getInstance().config();
+    if (config == null
+        || !Configs.RELATIONAL_ENTITY_STORE.equals(config.get(Configs.ENTITY_STORE))) {
+      return null;
+    }
+    try {
+      return SqlSessionFactoryHelper.getInstance()
+          .getSqlSessionFactory()
+          .getConfiguration()
+          .getEnvironment()
+          .getDataSource();
+    } catch (RuntimeException e) {
+      // The relational backend is not initialized (e.g. standalone Iceberg REST server).
+      LOG.info("Relational metastore not available, async Iceberg purge disabled");
+      return null;
+    }
   }
 }

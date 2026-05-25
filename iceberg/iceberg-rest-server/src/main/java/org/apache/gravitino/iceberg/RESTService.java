@@ -23,7 +23,6 @@ import java.util.List;
 import java.util.Map;
 import javax.inject.Singleton;
 import javax.servlet.Servlet;
-import org.apache.commons.dbcp2.BasicDataSource;
 import org.apache.gravitino.Configs;
 import org.apache.gravitino.GravitinoEnv;
 import org.apache.gravitino.auxiliary.GravitinoAuxiliaryService;
@@ -82,7 +81,6 @@ public class RESTService implements GravitinoAuxiliaryService {
   private IcebergMetricsManager icebergMetricsManager;
   private IcebergConfigProvider configProvider;
   private IcebergPurgeWorker icebergPurgeWorker;
-  private BasicDataSource purgeDataSource;
   private boolean auxMode;
 
   private void initServer(IcebergConfig icebergConfig) {
@@ -126,11 +124,11 @@ public class RESTService implements GravitinoAuxiliaryService {
             icebergCatalogWrapperManager);
     this.icebergMetricsManager = new IcebergMetricsManager(icebergConfig);
 
-    // Async hard deletion: when configured, drops enqueue a job that a background worker drains.
+    // Async hard deletion: reuse the entity store's relational DataSource so a
+    // DELETE ...?purgeRequested=true enqueues a job that a background worker drains.
     IcebergPurgeJobStore purgeJobStore = null;
-    if (IcebergPurgeJobStoreFactory.isEnabled(icebergConfig)) {
-      this.purgeDataSource = IcebergPurgeJobStoreFactory.createDataSource(icebergConfig);
-      purgeJobStore = new IcebergPurgeJobStore(purgeDataSource);
+    if (IcebergPurgeJobStoreFactory.isEnabled()) {
+      purgeJobStore = new IcebergPurgeJobStore(IcebergPurgeJobStoreFactory.sharedDataSource());
       this.icebergPurgeWorker = new IcebergPurgeWorker(purgeJobStore, icebergConfig);
       LOG.info("Async Iceberg purge enabled");
     }
@@ -248,9 +246,7 @@ public class RESTService implements GravitinoAuxiliaryService {
     if (icebergPurgeWorker != null) {
       icebergPurgeWorker.close();
     }
-    if (purgeDataSource != null) {
-      purgeDataSource.close();
-    }
+    // The purge job store's DataSource is owned by the entity store, so it is not closed here.
   }
 
   public void join() {
