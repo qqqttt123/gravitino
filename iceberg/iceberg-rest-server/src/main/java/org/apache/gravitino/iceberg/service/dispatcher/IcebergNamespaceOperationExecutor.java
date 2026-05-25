@@ -21,7 +21,7 @@ package org.apache.gravitino.iceberg.service.dispatcher;
 
 import java.util.HashMap;
 import java.util.Map;
-import javax.annotation.Nullable;
+import java.util.Optional;
 import org.apache.gravitino.auth.AuthConstants;
 import org.apache.gravitino.catalog.lakehouse.iceberg.IcebergConstants;
 import org.apache.gravitino.iceberg.service.IcebergCatalogWrapperManager;
@@ -46,7 +46,7 @@ public class IcebergNamespaceOperationExecutor implements IcebergNamespaceOperat
       LoggerFactory.getLogger(IcebergNamespaceOperationExecutor.class);
 
   private final IcebergCatalogWrapperManager icebergCatalogWrapperManager;
-  @Nullable private final IcebergPurgeJobStore purgeJobStore;
+  private final Optional<IcebergPurgeJobStore> purgeJobStore;
 
   public IcebergNamespaceOperationExecutor(
       IcebergCatalogWrapperManager icebergCatalogWrapperManager) {
@@ -61,9 +61,9 @@ public class IcebergNamespaceOperationExecutor implements IcebergNamespaceOperat
    */
   public IcebergNamespaceOperationExecutor(
       IcebergCatalogWrapperManager icebergCatalogWrapperManager,
-      @Nullable IcebergPurgeJobStore purgeJobStore) {
+      IcebergPurgeJobStore purgeJobStore) {
     this.icebergCatalogWrapperManager = icebergCatalogWrapperManager;
-    this.purgeJobStore = purgeJobStore;
+    this.purgeJobStore = Optional.ofNullable(purgeJobStore);
   }
 
   @Override
@@ -140,14 +140,16 @@ public class IcebergNamespaceOperationExecutor implements IcebergNamespaceOperat
       RegisterTableRequest registerTableRequest) {
     // Name-reuse tombstone (design §5.13): reject registering at an identifier whose files are
     // still being purged. (Register-as-recovery, §5.7, will cancel the job before registering.)
-    if (purgeJobStore != null) {
-      Long jobId =
-          purgeJobStore.findActiveJobId(
-              context.catalogName(), namespace.toString(), registerTableRequest.name());
-      if (jobId != null) {
+    if (purgeJobStore.isPresent()) {
+      Optional<Long> jobId =
+          purgeJobStore
+              .get()
+              .findActiveJobId(
+                  context.catalogName(), namespace.toString(), registerTableRequest.name());
+      if (jobId.isPresent()) {
         throw new AlreadyExistsException(
             "Cannot register table %s.%s: it is being purged (cleanup job %d still in progress)",
-            namespace, registerTableRequest.name(), jobId);
+            namespace, registerTableRequest.name(), jobId.get());
       }
     }
 

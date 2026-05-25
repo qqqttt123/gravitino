@@ -138,7 +138,7 @@ class TestIcebergPurgeWorker {
 
     claimAndProcess(id);
 
-    assertEquals(State.SUCCEEDED, store.load(id).state());
+    assertEquals(State.SUCCEEDED, store.load(id).orElseThrow(AssertionError::new).state());
     assertFalse(Files.exists(dataPath), "data file should be deleted");
     String metadataPath =
         metadataLocation.startsWith("file:")
@@ -166,7 +166,7 @@ class TestIcebergPurgeWorker {
 
     claimAndProcess(id);
 
-    assertEquals(State.FAILED, store.load(id).state());
+    assertEquals(State.FAILED, store.load(id).orElseThrow(AssertionError::new).state());
   }
 
   private void claimAndProcess(long id) {

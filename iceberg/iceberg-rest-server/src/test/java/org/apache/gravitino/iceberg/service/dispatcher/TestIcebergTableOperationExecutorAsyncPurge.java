@@ -32,6 +32,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 import org.apache.commons.lang3.reflect.FieldUtils;
 import org.apache.gravitino.iceberg.common.IcebergConfig;
 import org.apache.gravitino.iceberg.service.CatalogWrapperForREST;
@@ -143,7 +144,7 @@ class TestIcebergTableOperationExecutorAsyncPurge {
 
   @Test
   void testCreateTableRejectedWhilePurgeActive() {
-    when(store.findActiveJobId(CATALOG, "db", "t")).thenReturn(123L);
+    when(store.findActiveJobId(CATALOG, "db", "t")).thenReturn(Optional.of(123L));
     IcebergTableOperationExecutor executor =
         new IcebergTableOperationExecutor(wrapperManager, store, 5);
     CreateTableRequest request =
@@ -157,7 +158,7 @@ class TestIcebergTableOperationExecutorAsyncPurge {
 
   @Test
   void testCreateTableProceedsWhenNoActivePurge() {
-    when(store.findActiveJobId(CATALOG, "db", "t")).thenReturn(null);
+    when(store.findActiveJobId(CATALOG, "db", "t")).thenReturn(Optional.empty());
     LoadTableResponse created = mock(LoadTableResponse.class);
     when(wrapper.createTable(eq(Namespace.of("db")), any(CreateTableRequest.class), anyBoolean()))
         .thenReturn(created);

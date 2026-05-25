@@ -20,7 +20,7 @@ package org.apache.gravitino.iceberg.service.purge;
 
 import com.google.common.collect.ImmutableMap;
 import java.util.Map;
-import javax.annotation.Nullable;
+import java.util.Optional;
 
 /**
  * An async hard-deletion (purge) job, mirroring one row of the {@code iceberg_purge_job} table. A
@@ -59,8 +59,8 @@ public class IcebergPurgeJob {
   private State state;
   private int attempts;
   private int maxAttempts;
-  @Nullable private String lastError;
-  @Nullable private Long heartbeatAt;
+  private String lastError;
+  private Long heartbeatAt;
   private long nextAttemptAt;
   private long createdAt;
   private String createdBy;
@@ -116,14 +116,12 @@ public class IcebergPurgeJob {
     return maxAttempts;
   }
 
-  @Nullable
-  String lastError() {
-    return lastError;
+  Optional<String> lastError() {
+    return Optional.ofNullable(lastError);
   }
 
-  @Nullable
-  Long heartbeatAt() {
-    return heartbeatAt;
+  Optional<Long> heartbeatAt() {
+    return Optional.ofNullable(heartbeatAt);
   }
 
   long nextAttemptAt() {
@@ -269,7 +267,7 @@ public class IcebergPurgeJob {
      * @param lastError the last error message, or {@code null}
      * @return this builder
      */
-    public Builder lastError(@Nullable String lastError) {
+    public Builder lastError(String lastError) {
       job.lastError = lastError;
       return this;
     }
@@ -278,7 +276,7 @@ public class IcebergPurgeJob {
      * @param heartbeatAt the last heartbeat time in millis, or {@code null} when unclaimed
      * @return this builder
      */
-    public Builder heartbeatAt(@Nullable Long heartbeatAt) {
+    public Builder heartbeatAt(Long heartbeatAt) {
       job.heartbeatAt = heartbeatAt;
       return this;
     }

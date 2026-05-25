@@ -21,6 +21,7 @@ package org.apache.gravitino.iceberg.service.purge;
 import com.google.common.annotations.VisibleForTesting;
 import java.io.Closeable;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -143,11 +144,12 @@ public class IcebergPurgeWorker implements Closeable {
 
   @VisibleForTesting
   void process(long id) {
-    IcebergPurgeJob job = store.load(id);
-    if (job == null || job.state() != State.RUNNING) {
+    Optional<IcebergPurgeJob> loaded = store.load(id);
+    if (!loaded.isPresent() || loaded.get().state() != State.RUNNING) {
       // Cancelled by recovery, already finished, or reclaimed elsewhere; nothing to do.
       return;
     }
+    IcebergPurgeJob job = loaded.get();
     FileIO io = null;
     try {
       io = CatalogUtil.loadFileIO(job.fileIoImpl(), job.fileIoProps(), hadoopConf);

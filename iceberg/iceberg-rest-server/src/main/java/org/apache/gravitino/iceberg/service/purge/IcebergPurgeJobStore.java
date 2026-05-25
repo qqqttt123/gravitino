@@ -29,6 +29,7 @@ import java.sql.Statement;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 import javax.sql.DataSource;
 import org.apache.gravitino.exceptions.GravitinoRuntimeException;
@@ -157,16 +158,16 @@ public class IcebergPurgeJobStore {
    * @param catalogName the catalog name
    * @param namespace the table namespace
    * @param objectName the table name
-   * @return the blocking job id, or {@code null} if the identifier is free
+   * @return the blocking job id, or {@link Optional#empty()} if the identifier is free
    */
-  public Long findActiveJobId(String catalogName, String namespace, String objectName) {
+  public Optional<Long> findActiveJobId(String catalogName, String namespace, String objectName) {
     try (Connection conn = dataSource.getConnection();
         PreparedStatement stmt = conn.prepareStatement(SELECT_ACTIVE_ID_SQL)) {
       stmt.setString(1, catalogName);
       stmt.setString(2, namespace);
       stmt.setString(3, objectName);
       try (ResultSet rs = stmt.executeQuery()) {
-        return rs.next() ? rs.getLong(1) : null;
+        return rs.next() ? Optional.of(rs.getLong(1)) : Optional.empty();
       }
     } catch (SQLException e) {
       throw new GravitinoRuntimeException(e, "Failed to look up active purge job");
@@ -225,14 +226,14 @@ public class IcebergPurgeJobStore {
    * Loads a job by id.
    *
    * @param id the job id
-   * @return the job, or {@code null} if no such row exists
+   * @return the job, or {@link Optional#empty()} if no such row exists
    */
-  public IcebergPurgeJob load(long id) {
+  public Optional<IcebergPurgeJob> load(long id) {
     try (Connection conn = dataSource.getConnection();
         PreparedStatement stmt = conn.prepareStatement(SELECT_BY_ID_SQL)) {
       stmt.setLong(1, id);
       try (ResultSet rs = stmt.executeQuery()) {
-        return rs.next() ? fromRow(rs) : null;
+        return rs.next() ? Optional.of(fromRow(rs)) : Optional.empty();
       }
     } catch (SQLException e) {
       throw new GravitinoRuntimeException(e, "Failed to load purge job " + id);

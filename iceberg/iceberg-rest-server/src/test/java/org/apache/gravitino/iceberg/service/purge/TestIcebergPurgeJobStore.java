@@ -20,13 +20,13 @@ package org.apache.gravitino.iceberg.service.purge;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.google.common.collect.ImmutableMap;
 import java.sql.Connection;
 import java.sql.Statement;
 import java.util.List;
+import java.util.Optional;
 import org.apache.commons.dbcp2.BasicDataSource;
 import org.apache.gravitino.iceberg.service.purge.IcebergPurgeJob.State;
 import org.junit.jupiter.api.AfterAll;
@@ -110,15 +110,15 @@ class TestIcebergPurgeJobStore {
     long id = store.enqueue(sampleJob());
     assertTrue(id > 0);
 
-    IcebergPurgeJob loaded = store.load(id);
+    IcebergPurgeJob loaded = store.load(id).orElseThrow(AssertionError::new);
     assertEquals(State.PENDING, loaded.state());
     assertEquals(0, loaded.attempts());
     assertEquals(3, loaded.maxAttempts());
     assertEquals("db", loaded.namespace());
     assertEquals("t", loaded.objectName());
     assertEquals("http://minio:9000", loaded.fileIoProps().get("s3.endpoint"));
-    assertNull(loaded.heartbeatAt());
-    assertNull(loaded.lastError());
+    assertFalse(loaded.heartbeatAt().isPresent());
+    assertFalse(loaded.lastError().isPresent());
   }
 
   @Test
@@ -133,9 +133,9 @@ class TestIcebergPurgeJobStore {
     assertTrue(store.claim(id, now, staleBefore), "first claim should win");
     assertFalse(store.claim(id, now, staleBefore), "second claim must lose");
 
-    IcebergPurgeJob claimed = store.load(id);
+    IcebergPurgeJob claimed = store.load(id).orElseThrow(AssertionError::new);
     assertEquals(State.RUNNING, claimed.state());
-    assertEquals(Long.valueOf(now), claimed.heartbeatAt());
+    assertEquals(Optional.of(now), claimed.heartbeatAt());
   }
 
   @Test
@@ -159,9 +159,9 @@ class TestIcebergPurgeJobStore {
     store.claim(id, now, now - TIMEOUT_MS);
 
     store.markSucceeded(id);
-    IcebergPurgeJob done = store.load(id);
+    IcebergPurgeJob done = store.load(id).orElseThrow(AssertionError::new);
     assertEquals(State.SUCCEEDED, done.state());
-    assertNull(done.heartbeatAt());
+    assertFalse(done.heartbeatAt().isPresent());
     assertFalse(store.readCandidateIds(now, now - TIMEOUT_MS, 10).contains(id));
   }
 
@@ -174,12 +174,12 @@ class TestIcebergPurgeJobStore {
     long nextAttemptAt = now + 60000;
     store.markForRetry(id, 1, nextAttemptAt, "transient boom");
 
-    IcebergPurgeJob retried = store.load(id);
+    IcebergPurgeJob retried = store.load(id).orElseThrow(AssertionError::new);
     assertEquals(State.PENDING, retried.state());
     assertEquals(1, retried.attempts());
     assertEquals(nextAttemptAt, retried.nextAttemptAt());
-    assertEquals("transient boom", retried.lastError());
-    assertNull(retried.heartbeatAt());
+    assertEquals(Optional.of("transient boom"), retried.lastError());
+    assertFalse(retried.heartbeatAt().isPresent());
 
     // Not yet due.
     assertFalse(store.readCandidateIds(now, now - TIMEOUT_MS, 10).contains(id));
@@ -194,10 +194,10 @@ class TestIcebergPurgeJobStore {
     store.claim(id, now, now - TIMEOUT_MS);
 
     store.markFailed(id, 3, "permanent boom");
-    IcebergPurgeJob failed = store.load(id);
+    IcebergPurgeJob failed = store.load(id).orElseThrow(AssertionError::new);
     assertEquals(State.FAILED, failed.state());
     assertEquals(3, failed.attempts());
-    assertEquals("permanent boom", failed.lastError());
+    assertEquals(Optional.of("permanent boom"), failed.lastError());
     assertFalse(store.readCandidateIds(now, now - TIMEOUT_MS, 10).contains(id));
   }
 
@@ -206,18 +206,18 @@ class TestIcebergPurgeJobStore {
     long id = store.enqueue(sampleJob());
 
     // PENDING is active.
-    assertEquals(Long.valueOf(id), store.findActiveJobId("cat", "db", "t"));
+    assertEquals(Optional.of(id), store.findActiveJobId("cat", "db", "t"));
     // Different identifier is free.
-    assertNull(store.findActiveJobId("cat", "db", "other"));
+    assertFalse(store.findActiveJobId("cat", "db", "other").isPresent());
 
     // RUNNING is still active.
     long now = System.currentTimeMillis();
     store.claim(id, now, now - TIMEOUT_MS);
-    assertEquals(Long.valueOf(id), store.findActiveJobId("cat", "db", "t"));
+    assertEquals(Optional.of(id), store.findActiveJobId("cat", "db", "t"));
 
     // Terminal states no longer block reuse.
     store.markSucceeded(id);
-    assertNull(store.findActiveJobId("cat", "db", "t"));
+    assertFalse(store.findActiveJobId("cat", "db", "t").isPresent());
   }
 
   @Test
@@ -228,6 +228,6 @@ class TestIcebergPurgeJobStore {
 
     long beat = now + 5000;
     store.heartbeat(java.util.Collections.singletonList(id), beat);
-    assertEquals(Long.valueOf(beat), store.load(id).heartbeatAt());
+    assertEquals(Optional.of(beat), store.load(id).orElseThrow(AssertionError::new).heartbeatAt());
   }
 }

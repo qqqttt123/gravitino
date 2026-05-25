@@ -27,6 +27,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.util.Optional;
 import org.apache.gravitino.iceberg.service.CatalogWrapperForREST;
 import org.apache.gravitino.iceberg.service.IcebergCatalogWrapperManager;
 import org.apache.gravitino.iceberg.service.purge.IcebergPurgeJobStore;
@@ -63,7 +64,7 @@ class TestIcebergNamespaceOperationExecutorRegisterTombstone {
 
   @Test
   void testRegisterRejectedWhilePurgeActive() {
-    when(store.findActiveJobId(CATALOG, "db", "t")).thenReturn(7L);
+    when(store.findActiveJobId(CATALOG, "db", "t")).thenReturn(Optional.of(7L));
     IcebergNamespaceOperationExecutor executor =
         new IcebergNamespaceOperationExecutor(wrapperManager, store);
 
@@ -74,7 +75,7 @@ class TestIcebergNamespaceOperationExecutorRegisterTombstone {
 
   @Test
   void testRegisterProceedsWhenNoActivePurge() {
-    when(store.findActiveJobId(CATALOG, "db", "t")).thenReturn(null);
+    when(store.findActiveJobId(CATALOG, "db", "t")).thenReturn(Optional.empty());
     LoadTableResponse registered = mock(LoadTableResponse.class);
     when(wrapper.registerTable(eq(NAMESPACE), eq(request), anyBoolean())).thenReturn(registered);
     IcebergNamespaceOperationExecutor executor =

@@ -22,7 +22,6 @@ package org.apache.gravitino.iceberg.service.dispatcher;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
-import javax.annotation.Nullable;
 import org.apache.gravitino.Entity;
 import org.apache.gravitino.NameIdentifier;
 import org.apache.gravitino.auth.AuthConstants;
@@ -61,7 +60,7 @@ public class IcebergTableOperationExecutor implements IcebergTableOperationDispa
   private static final String DEFAULT_FILE_IO_IMPL = "org.apache.iceberg.io.ResolvingFileIO";
 
   private final IcebergCatalogWrapperManager icebergCatalogWrapperManager;
-  @Nullable private final IcebergPurgeJobStore purgeJobStore;
+  private final Optional<IcebergPurgeJobStore> purgeJobStore;
   private final int purgeMaxAttempts;
 
   public IcebergTableOperationExecutor(IcebergCatalogWrapperManager icebergCatalogWrapperManager) {
@@ -77,10 +76,10 @@ public class IcebergTableOperationExecutor implements IcebergTableOperationDispa
    */
   public IcebergTableOperationExecutor(
       IcebergCatalogWrapperManager icebergCatalogWrapperManager,
-      @Nullable IcebergPurgeJobStore purgeJobStore,
+      IcebergPurgeJobStore purgeJobStore,
       int purgeMaxAttempts) {
     this.icebergCatalogWrapperManager = icebergCatalogWrapperManager;
-    this.purgeJobStore = purgeJobStore;
+    this.purgeJobStore = Optional.ofNullable(purgeJobStore);
     this.purgeMaxAttempts = purgeMaxAttempts;
   }
 
@@ -89,14 +88,16 @@ public class IcebergTableOperationExecutor implements IcebergTableOperationDispa
       IcebergRequestContext context, Namespace namespace, CreateTableRequest createTableRequest) {
     // Name-reuse tombstone (design §5.13): while a purge job for this identifier is still active,
     // its files are not yet deleted, so recreating the same table is rejected with 409 Conflict.
-    if (purgeJobStore != null) {
-      Long jobId =
-          purgeJobStore.findActiveJobId(
-              context.catalogName(), namespace.toString(), createTableRequest.name());
-      if (jobId != null) {
+    if (purgeJobStore.isPresent()) {
+      Optional<Long> jobId =
+          purgeJobStore
+              .get()
+              .findActiveJobId(
+                  context.catalogName(), namespace.toString(), createTableRequest.name());
+      if (jobId.isPresent()) {
         throw new AlreadyExistsException(
             "Cannot create table %s.%s: it is being purged (cleanup job %d still in progress)",
-            namespace, createTableRequest.name(), jobId);
+            namespace, createTableRequest.name(), jobId.get());
       }
     }
 
@@ -157,7 +158,7 @@ public class IcebergTableOperationExecutor implements IcebergTableOperationDispa
       return;
     }
 
-    if (purgeJobStore == null || !asyncPurgeRequested(context)) {
+    if (!purgeJobStore.isPresent() || !asyncPurgeRequested(context)) {
       // Synchronous fallback: delete files on the request thread, today's behavior.
       wrapper.purgeTable(tableIdentifier);
       return;
@@ -174,19 +175,21 @@ public class IcebergTableOperationExecutor implements IcebergTableOperationDispa
     }
 
     wrapper.dropTable(tableIdentifier);
-    purgeJobStore.enqueue(
-        IcebergPurgeJob.builder()
-            .metalakeName(IcebergRESTServerContext.getInstance().metalakeName())
-            .catalogName(context.catalogName())
-            .namespace(tableIdentifier.namespace().toString())
-            .objectName(tableIdentifier.name())
-            .objectType(IcebergPurgeJob.TABLE)
-            .metadataLocation(metadataLocation)
-            .fileIoImpl(fileIoImpl)
-            .fileIoProps(catalogConfig.getIcebergCatalogProperties())
-            .maxAttempts(purgeMaxAttempts)
-            .createdBy(context.userName())
-            .build());
+    purgeJobStore
+        .get()
+        .enqueue(
+            IcebergPurgeJob.builder()
+                .metalakeName(IcebergRESTServerContext.getInstance().metalakeName())
+                .catalogName(context.catalogName())
+                .namespace(tableIdentifier.namespace().toString())
+                .objectName(tableIdentifier.name())
+                .objectType(IcebergPurgeJob.TABLE)
+                .metadataLocation(metadataLocation)
+                .fileIoImpl(fileIoImpl)
+                .fileIoProps(catalogConfig.getIcebergCatalogProperties())
+                .maxAttempts(purgeMaxAttempts)
+                .createdBy(context.userName())
+                .build());
     LOG.info("Enqueued async purge job for table {}", tableIdentifier);
   }
 
