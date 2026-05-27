@@ -20,102 +20,24 @@
 package org.apache.gravitino.iceberg.service.purge;
 
 import com.google.common.collect.ImmutableMap;
-import java.sql.Connection;
-import java.sql.Statement;
-import java.util.Arrays;
-import java.util.UUID;
-import org.apache.gravitino.Config;
-import org.apache.gravitino.Configs;
-import org.apache.gravitino.integration.test.container.ContainerSuite;
-import org.apache.gravitino.integration.test.util.BaseIT;
 import org.apache.gravitino.storage.RandomIdGenerator;
-import org.apache.gravitino.storage.relational.JDBCBackend;
-import org.apache.gravitino.storage.relational.RelationalBackend;
-import org.apache.gravitino.storage.relational.session.SqlSessionFactoryHelper;
-import org.apache.ibatis.session.SqlSession;
-import org.junit.jupiter.api.AfterAll;
+import org.apache.gravitino.storage.relational.TestJDBCBackend;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.TestInstance;
-import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
-import org.mockito.Mockito;
+import org.junit.jupiter.api.TestTemplate;
 
 /**
- * Shared purge-store test logic exercised against a real entity-store relational backend. Concrete
- * subclasses supply the backend (MySQL, PostgreSQL, ...) by mirroring the core module's {@code
- * TestJDBCBackend}: each points the shared {@link SqlSessionFactoryHelper} at its database (whose
- * schema, including {@code iceberg_cleanup_job}, is applied by the database init helper), so the
- * mapper SQL is verified across backends.
+ * Shared purge-store test logic exercised against the same relational backend matrix as core
+ * metadata service tests. {@link TestJDBCBackend} initializes H2 by default, adds MySQL and
+ * PostgreSQL when {@code dockerTest=true}, and truncates all backend tables before each invocation.
  */
-@TestInstance(TestInstance.Lifecycle.PER_CLASS)
-abstract class AbstractIcebergPurgeJobStoreBackendTest {
+abstract class AbstractIcebergPurgeJobStoreBackendTest extends TestJDBCBackend {
 
-  private RelationalBackend backend;
   private IcebergPurgeJobStore store;
 
-  /** Returns the JDBC connection settings for this backend, with its schema already applied. */
-  protected abstract JdbcConfig jdbcConfig() throws Exception;
-
-  @BeforeAll
-  void setUp() throws Exception {
-    JdbcConfig jdbc = jdbcConfig();
-    Config config = Mockito.mock(Config.class);
-    Mockito.when(config.get(Configs.ENTITY_STORE)).thenReturn(Configs.RELATIONAL_ENTITY_STORE);
-    Mockito.when(config.get(Configs.ENTITY_RELATIONAL_STORE))
-        .thenReturn(Configs.DEFAULT_ENTITY_RELATIONAL_STORE);
-    Mockito.when(config.get(Configs.ENTITY_RELATIONAL_JDBC_BACKEND_URL)).thenReturn(jdbc.url);
-    Mockito.when(config.get(Configs.ENTITY_RELATIONAL_JDBC_BACKEND_USER)).thenReturn(jdbc.user);
-    Mockito.when(config.get(Configs.ENTITY_RELATIONAL_JDBC_BACKEND_PASSWORD))
-        .thenReturn(jdbc.password);
-    Mockito.when(config.get(Configs.ENTITY_RELATIONAL_JDBC_BACKEND_DRIVER)).thenReturn(jdbc.driver);
-    Mockito.when(config.get(Configs.ENTITY_RELATIONAL_JDBC_BACKEND_MAX_CONNECTIONS))
-        .thenReturn(Configs.DEFAULT_RELATIONAL_JDBC_BACKEND_MAX_CONNECTIONS);
-    Mockito.when(config.get(Configs.ENTITY_RELATIONAL_JDBC_BACKEND_WAIT_MILLISECONDS))
-        .thenReturn(Configs.DEFAULT_RELATIONAL_JDBC_BACKEND_MAX_WAIT_MILLISECONDS);
-
-    // Reset any factory a previous test class initialized, then point it at this backend.
-    SqlSessionFactoryHelper.getInstance().close();
-    backend = new JDBCBackend();
-    backend.initialize(config);
-    afterBackendInitialized();
-    store = new IcebergPurgeJobStore(new RandomIdGenerator());
-  }
-
-  @AfterAll
-  void tearDown() throws Exception {
-    if (backend != null) {
-      backend.close();
-    }
-    if (ContainerSuite.initialized()) {
-      ContainerSuite.getInstance().close();
-    }
-  }
-
   @BeforeEach
-  void clear() {
-    execute("DELETE FROM iceberg_cleanup_job");
-  }
-
-  protected void afterBackendInitialized() {}
-
-  protected void executeStatements(String sqlStatements) {
-    Arrays.stream(sqlStatements.split(";"))
-        .map(String::trim)
-        .filter(statement -> !statement.isEmpty())
-        .forEach(this::execute);
-  }
-
-  protected void execute(String sql) {
-    try (SqlSession session =
-            SqlSessionFactoryHelper.getInstance().getSqlSessionFactory().openSession(true);
-        Connection connection = session.getConnection();
-        Statement statement = connection.createStatement()) {
-      statement.execute(sql);
-    } catch (Exception e) {
-      throw new RuntimeException("Failed to execute purge backend test SQL: " + sql, e);
-    }
+  public void preparePurgeJobStore() {
+    store = new IcebergPurgeJobStore(new RandomIdGenerator());
   }
 
   private static IcebergPurgeJob sampleJob() {
@@ -131,7 +53,7 @@ abstract class AbstractIcebergPurgeJobStoreBackendTest {
         "alice");
   }
 
-  @Test
+  @TestTemplate
   void testEnqueueClaimSucceedLifecycle() {
     long id = store.enqueue(sampleJob());
     Assertions.assertTrue(id > 0);
@@ -151,7 +73,7 @@ abstract class AbstractIcebergPurgeJobStoreBackendTest {
     Assertions.assertEquals(1, store.pruneTerminalBefore(System.currentTimeMillis() + 1));
   }
 
-  @Test
+  @TestTemplate
   void testTransientFailureRetriesThenFailsAtCeiling() {
     long id = store.enqueue(sampleJob());
     for (int i = 0; i < 2; i++) {
@@ -164,7 +86,7 @@ abstract class AbstractIcebergPurgeJobStoreBackendTest {
     Assertions.assertEquals(IcebergPurgeJob.State.FAILED, store.stateOf(id));
   }
 
-  @Test
+  @TestTemplate
   void testHeartbeatCasAndStaleReclaim() {
     long id = store.enqueue(sampleJob());
     long t0 = System.currentTimeMillis();
@@ -174,60 +96,6 @@ abstract class AbstractIcebergPurgeJobStoreBackendTest {
     // A stale RUNNING job is reclaimable once its heartbeat ages past the timeout.
     Assertions.assertEquals(id, store.claimNext(t0 + 400_000L, 300_000L, 10).id());
   }
-
-  /** Minimal JDBC connection settings for a backend whose schema is already initialized. */
-  protected static class JdbcConfig {
-    final String url;
-    final String user;
-    final String password;
-    final String driver;
-
-    JdbcConfig(String url, String user, String password, String driver) {
-      this.url = url;
-      this.user = user;
-      this.password = password;
-      this.driver = driver;
-    }
-  }
 }
 
-class TestIcebergPurgeJobStoreH2Backend extends AbstractIcebergPurgeJobStoreBackendTest {
-
-  @Override
-  protected JdbcConfig jdbcConfig() {
-    String name = UUID.randomUUID().toString().replace("-", "");
-    return new JdbcConfig(
-        "jdbc:h2:mem:iceberg_purge_" + name + ";DB_CLOSE_DELAY=-1;MODE=MYSQL",
-        "sa",
-        "",
-        "org.h2.Driver");
-  }
-
-  @Override
-  protected void afterBackendInitialized() {
-    executeStatements(PurgeTestSchema.H2_CREATE);
-  }
-}
-
-@EnabledIfEnvironmentVariable(named = "dockerTest", matches = "true")
-class TestIcebergPurgeJobStoreMySQLBackend extends AbstractIcebergPurgeJobStoreBackendTest {
-
-  private final BaseIT baseIT = new BaseIT();
-
-  @Override
-  protected JdbcConfig jdbcConfig() {
-    return new JdbcConfig(
-        baseIT.startAndInitMySQLBackend(), "root", "root", "com.mysql.cj.jdbc.Driver");
-  }
-}
-
-@EnabledIfEnvironmentVariable(named = "dockerTest", matches = "true")
-class TestIcebergPurgeJobStorePostgreSQLBackend extends AbstractIcebergPurgeJobStoreBackendTest {
-
-  private final BaseIT baseIT = new BaseIT();
-
-  @Override
-  protected JdbcConfig jdbcConfig() {
-    return new JdbcConfig(baseIT.startAndInitPGBackend(), "root", "root", "org.postgresql.Driver");
-  }
-}
+class TestIcebergPurgeJobStoreBackend extends AbstractIcebergPurgeJobStoreBackendTest {}
