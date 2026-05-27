@@ -34,32 +34,42 @@ import org.mockito.Mockito;
  */
 final class PurgeTestBackend {
 
-  private static volatile boolean initialized;
-
   private PurgeTestBackend() {}
 
+  /**
+   * Ensures the shared {@link SqlSessionFactoryHelper} points at an in-memory H2 backend with the
+   * {@code iceberg_cleanup_job} table. Idempotent and resilient to the factory having been closed
+   * or repointed by another test class (e.g. the docker-tagged multi-database IT).
+   */
   static synchronized void init() {
-    if (initialized) {
-      clear();
-      return;
+    if (!factoryInitialized()) {
+      Config config = Mockito.mock(Config.class);
+      Mockito.when(config.get(Configs.ENTITY_STORE)).thenReturn("relational");
+      Mockito.when(config.get(Configs.ENTITY_RELATIONAL_STORE)).thenReturn("h2");
+      Mockito.when(config.get(Configs.ENTITY_RELATIONAL_JDBC_BACKEND_URL))
+          .thenReturn("jdbc:h2:mem:iceberg_purge_test;DB_CLOSE_DELAY=-1;MODE=MYSQL");
+      Mockito.when(config.get(Configs.ENTITY_RELATIONAL_JDBC_BACKEND_USER)).thenReturn("sa");
+      Mockito.when(config.get(Configs.ENTITY_RELATIONAL_JDBC_BACKEND_PASSWORD)).thenReturn("");
+      Mockito.when(config.get(Configs.ENTITY_RELATIONAL_JDBC_BACKEND_DRIVER))
+          .thenReturn("org.h2.Driver");
+      Mockito.when(config.get(Configs.ENTITY_RELATIONAL_JDBC_BACKEND_MAX_CONNECTIONS))
+          .thenReturn(20);
+      Mockito.when(config.get(Configs.ENTITY_RELATIONAL_JDBC_BACKEND_WAIT_MILLISECONDS))
+          .thenReturn(1000L);
+
+      SqlSessionFactoryHelper.getInstance().init(config);
     }
-
-    Config config = Mockito.mock(Config.class);
-    Mockito.when(config.get(Configs.ENTITY_STORE)).thenReturn("relational");
-    Mockito.when(config.get(Configs.ENTITY_RELATIONAL_STORE)).thenReturn("h2");
-    Mockito.when(config.get(Configs.ENTITY_RELATIONAL_JDBC_BACKEND_URL))
-        .thenReturn("jdbc:h2:mem:iceberg_purge_test;DB_CLOSE_DELAY=-1;MODE=MYSQL");
-    Mockito.when(config.get(Configs.ENTITY_RELATIONAL_JDBC_BACKEND_USER)).thenReturn("sa");
-    Mockito.when(config.get(Configs.ENTITY_RELATIONAL_JDBC_BACKEND_PASSWORD)).thenReturn("");
-    Mockito.when(config.get(Configs.ENTITY_RELATIONAL_JDBC_BACKEND_DRIVER))
-        .thenReturn("org.h2.Driver");
-    Mockito.when(config.get(Configs.ENTITY_RELATIONAL_JDBC_BACKEND_MAX_CONNECTIONS)).thenReturn(20);
-    Mockito.when(config.get(Configs.ENTITY_RELATIONAL_JDBC_BACKEND_WAIT_MILLISECONDS))
-        .thenReturn(1000L);
-
-    SqlSessionFactoryHelper.getInstance().init(config);
     createSchema();
-    initialized = true;
+    clear();
+  }
+
+  private static boolean factoryInitialized() {
+    try {
+      SqlSessionFactoryHelper.getInstance().getSqlSessionFactory();
+      return true;
+    } catch (IllegalStateException notInitialized) {
+      return false;
+    }
   }
 
   /** Removes all rows so each test starts from a clean table. */

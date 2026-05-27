@@ -85,8 +85,8 @@ public class IcebergPurgeManager implements AutoCloseable {
     this.workerThreads = config.get(IcebergConfig.ASYNC_PURGE_WORKER_THREADS);
     int deleteThreads = config.get(IcebergConfig.ASYNC_PURGE_DELETE_THREADS);
     this.deleteBatchSize = config.get(IcebergConfig.ASYNC_PURGE_DELETE_BATCH_SIZE);
-    this.pollIntervalMs = config.get(IcebergConfig.ASYNC_PURGE_POLL_INTERVAL_MS);
-    this.heartbeatTimeoutMs = config.get(IcebergConfig.ASYNC_PURGE_HEARTBEAT_TIMEOUT_MS);
+    this.pollIntervalMs = config.get(IcebergConfig.ASYNC_PURGE_POLL_INTERVAL_SECS) * 1000L;
+    this.heartbeatTimeoutMs = config.get(IcebergConfig.ASYNC_PURGE_HEARTBEAT_TIMEOUT_SECS) * 1000L;
     this.maxAttempts = config.get(IcebergConfig.ASYNC_PURGE_MAX_ATTEMPTS);
     this.retentionMs = config.get(IcebergConfig.ASYNC_PURGE_RETENTION_HOURS) * 3_600_000L;
     this.candidateWindow = Math.max(8, workerThreads * 4);
@@ -267,6 +267,11 @@ public class IcebergPurgeManager implements AutoCloseable {
           for (String path : paths) {
             files.add(path);
           }
+        } catch (NotFoundException alreadyGone) {
+          // A concurrent worker (e.g. one that reclaimed this job after a heartbeat timeout) may
+          // have already deleted this manifest. Propagate so runJob treats the job as completed
+          // rather than a transient failure, keeping purge idempotent under double processing.
+          throw alreadyGone;
         } catch (Exception e) {
           throw new RuntimeException("Failed to read manifest " + manifest.path(), e);
         }

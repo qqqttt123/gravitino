@@ -316,17 +316,6 @@ public class IcebergConfig extends Config implements OverwriteDefaultConfig {
           .checkValue(value -> value > 0, ConfigConstants.POSITIVE_NUMBER_ERROR_MSG)
           .createWithDefault(60);
 
-  public static final ConfigEntry<Boolean> ASYNC_PURGE_ENABLED =
-      new ConfigBuilder("async-purge.enabled")
-          .doc(
-              "Whether the asynchronous table purge engine is enabled. When false, the purge"
-                  + " worker threads and the backend job store are not started, and async purge"
-                  + " requests fall back to synchronous purge. Enabling it requires the Gravitino"
-                  + " relational backend to be initialized with the iceberg_cleanup_job table.")
-          .version(ConfigConstants.VERSION_1_3_0)
-          .booleanConf()
-          .createWithDefault(false);
-
   public static final ConfigEntry<Integer> ASYNC_PURGE_WORKER_THREADS =
       new ConfigBuilder("async-purge.worker-threads")
           .doc("Worker pool size per server (concurrent async purge jobs).")
@@ -351,21 +340,21 @@ public class IcebergConfig extends Config implements OverwriteDefaultConfig {
           .checkValue(value -> value > 0, ConfigConstants.POSITIVE_NUMBER_ERROR_MSG)
           .createWithDefault(1000);
 
-  public static final ConfigEntry<Long> ASYNC_PURGE_POLL_INTERVAL_MS =
-      new ConfigBuilder("async-purge.poll-interval-ms")
-          .doc("Worker poll interval in milliseconds; also the retry interval.")
+  public static final ConfigEntry<Integer> ASYNC_PURGE_POLL_INTERVAL_SECS =
+      new ConfigBuilder("async-purge.poll-interval-secs")
+          .doc("Worker poll interval in seconds; also the retry interval.")
           .version(ConfigConstants.VERSION_1_3_0)
-          .longConf()
+          .intConf()
           .checkValue(value -> value > 0, ConfigConstants.POSITIVE_NUMBER_ERROR_MSG)
-          .createWithDefault(5000L);
+          .createWithDefault(5);
 
-  public static final ConfigEntry<Long> ASYNC_PURGE_HEARTBEAT_TIMEOUT_MS =
-      new ConfigBuilder("async-purge.heartbeat-timeout-ms")
-          .doc("Age in milliseconds after which a job with no heartbeat is reclaimable.")
+  public static final ConfigEntry<Integer> ASYNC_PURGE_HEARTBEAT_TIMEOUT_SECS =
+      new ConfigBuilder("async-purge.heartbeat-timeout-secs")
+          .doc("Age in seconds after which a job with no heartbeat is reclaimable.")
           .version(ConfigConstants.VERSION_1_3_0)
-          .longConf()
+          .intConf()
           .checkValue(value -> value > 0, ConfigConstants.POSITIVE_NUMBER_ERROR_MSG)
-          .createWithDefault(300000L);
+          .createWithDefault(300);
 
   public static final ConfigEntry<Integer> ASYNC_PURGE_MAX_ATTEMPTS =
       new ConfigBuilder("async-purge.max-attempts")

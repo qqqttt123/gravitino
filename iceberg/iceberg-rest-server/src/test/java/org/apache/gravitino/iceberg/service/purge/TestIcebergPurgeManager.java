@@ -40,6 +40,7 @@ import org.apache.iceberg.Snapshot;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.catalog.TableIdentifier;
+import org.apache.iceberg.exceptions.NotFoundException;
 import org.apache.iceberg.inmemory.InMemoryCatalog;
 import org.apache.iceberg.inmemory.InMemoryFileIO;
 import org.apache.iceberg.io.FileIO;
@@ -71,7 +72,7 @@ class TestIcebergPurgeManager {
   private static IcebergConfig fastPollConfig() {
     Map<String, String> config = new HashMap<>();
     config.put("async-purge.worker-threads", "1");
-    config.put("async-purge.poll-interval-ms", "50");
+    config.put("async-purge.poll-interval-secs", "1");
     return new IcebergConfig(config);
   }
 
@@ -95,6 +96,17 @@ class TestIcebergPurgeManager {
     try {
       svc.deleteAll(new RecordingFileIO(deleted), Arrays.asList("a", "b", "c", "d", "e", "f", "g"));
       Assertions.assertEquals(7, deleted.size());
+    } finally {
+      svc.close();
+    }
+  }
+
+  @Test
+  void testDeleteAllIgnoresAlreadyDeletedFiles() {
+    IcebergPurgeManager svc = new IcebergPurgeManager(store, new IcebergConfig(new HashMap<>()));
+    try {
+      Assertions.assertDoesNotThrow(
+          () -> svc.deleteAll(new MissingFileIO(), Arrays.asList("already-gone")));
     } finally {
       svc.close();
     }
@@ -174,7 +186,7 @@ class TestIcebergPurgeManager {
   void testTransientFailureRetriesThenFails() {
     Map<String, String> config = new HashMap<>();
     config.put("async-purge.worker-threads", "1");
-    config.put("async-purge.poll-interval-ms", "50");
+    config.put("async-purge.poll-interval-secs", "1");
     config.put("async-purge.max-attempts", "3");
     IcebergPurgeManager svc =
         new IcebergPurgeManager(store, new IcebergConfig(config)) {
@@ -250,6 +262,23 @@ class TestIcebergPurgeManager {
     @Override
     public void deleteFile(String path) {
       throw new UnsupportedOperationException();
+    }
+  }
+
+  private static class MissingFileIO implements FileIO {
+    @Override
+    public InputFile newInputFile(String path) {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public OutputFile newOutputFile(String path) {
+      throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void deleteFile(String path) {
+      throw new NotFoundException("Missing file: %s", path);
     }
   }
 }

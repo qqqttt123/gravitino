@@ -122,15 +122,18 @@ public class RESTService implements GravitinoAuxiliaryService {
             skipAuthorizationForRestBackend,
             icebergCatalogWrapperManager);
     this.icebergMetricsManager = new IcebergMetricsManager(icebergConfig);
-    if (icebergConfig.get(IcebergConfig.ASYNC_PURGE_ENABLED)) {
-      // Reuse the entity store's shared relational backend (connection pool + per-backend SQL)
-      // instead of opening a dedicated JDBC pool here.
+    if (auxMode) {
+      // Async purge reuses the entity store's shared relational backend (connection pool +
+      // per-backend SQL), which is only available when running embedded in the Gravitino server
+      // (auxiliary mode). In standalone mode the purge manager stays null and purge requests fall
+      // back to synchronous purge.
       this.purgeManager =
           new IcebergPurgeManager(
               new IcebergPurgeJobStore(GravitinoEnv.getInstance().idGenerator()), icebergConfig);
     } else {
       LOG.info(
-          "Async Iceberg table purge is disabled; purge requests fall back to synchronous purge.");
+          "Async Iceberg table purge is only available in auxiliary mode; "
+              + "purge requests fall back to synchronous purge.");
     }
     // Table: HookDispatcher -> EventDispatcher -> OperationExecutor
     IcebergTableOperationDispatcher icebergTableOperationDispatcher =

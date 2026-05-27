@@ -131,8 +131,8 @@ public class IcebergTableOperationExecutor implements IcebergTableOperationDispa
       return;
     }
 
-    // Async purge is opt-in per request and additionally requires the purge service to be enabled
-    // on the server. When it is disabled, fall back to the synchronous purge behavior.
+    // Async purge is opt-in per request and only available when the purge manager is wired
+    // in auxiliary mode. Standalone mode falls back to synchronous purge.
     if (!context.asyncPurge() || purgeManager == null) {
       wrapper.purgeTable(tableIdentifier);
       return;
