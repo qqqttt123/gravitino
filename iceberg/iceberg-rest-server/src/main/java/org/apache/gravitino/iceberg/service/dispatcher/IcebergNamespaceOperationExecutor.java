@@ -21,6 +21,7 @@ package org.apache.gravitino.iceberg.service.dispatcher;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 import org.apache.gravitino.auth.AuthConstants;
 import org.apache.gravitino.catalog.lakehouse.iceberg.IcebergConstants;
 import org.apache.gravitino.iceberg.service.IcebergCatalogWrapperManager;
@@ -45,10 +46,11 @@ public class IcebergNamespaceOperationExecutor implements IcebergNamespaceOperat
       LoggerFactory.getLogger(IcebergNamespaceOperationExecutor.class);
 
   private final IcebergCatalogWrapperManager icebergCatalogWrapperManager;
-  private final IcebergPurgeManager purgeManager;
+  private final Optional<IcebergPurgeManager> purgeManager;
 
   public IcebergNamespaceOperationExecutor(
-      IcebergCatalogWrapperManager icebergCatalogWrapperManager, IcebergPurgeManager purgeManager) {
+      IcebergCatalogWrapperManager icebergCatalogWrapperManager,
+      Optional<IcebergPurgeManager> purgeManager) {
     this.icebergCatalogWrapperManager = icebergCatalogWrapperManager;
     this.purgeManager = purgeManager;
   }
@@ -126,8 +128,11 @@ public class IcebergNamespaceOperationExecutor implements IcebergNamespaceOperat
       Namespace namespace,
       RegisterTableRequest registerTableRequest) {
     String tableName = registerTableRequest.name();
-    if (purgeManager != null
-        && purgeManager.isNameOccupied(context.catalogName(), namespace.toString(), tableName)) {
+    if (purgeManager
+        .map(
+            manager ->
+                manager.isNameOccupied(context.catalogName(), namespace.toString(), tableName))
+        .orElse(false)) {
       throw new AlreadyExistsException(
           "Table %s.%s is being purged; retry after cleanup completes", namespace, tableName);
     }

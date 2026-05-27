@@ -56,10 +56,11 @@ public class IcebergTableOperationExecutor implements IcebergTableOperationDispa
   private static final Logger LOG = LoggerFactory.getLogger(IcebergTableOperationExecutor.class);
 
   private final IcebergCatalogWrapperManager icebergCatalogWrapperManager;
-  private final IcebergPurgeManager purgeManager;
+  private final Optional<IcebergPurgeManager> purgeManager;
 
   public IcebergTableOperationExecutor(
-      IcebergCatalogWrapperManager icebergCatalogWrapperManager, IcebergPurgeManager purgeManager) {
+      IcebergCatalogWrapperManager icebergCatalogWrapperManager,
+      Optional<IcebergPurgeManager> purgeManager) {
     this.icebergCatalogWrapperManager = icebergCatalogWrapperManager;
     this.purgeManager = purgeManager;
   }
@@ -68,8 +69,11 @@ public class IcebergTableOperationExecutor implements IcebergTableOperationDispa
   public LoadTableResponse createTable(
       IcebergRequestContext context, Namespace namespace, CreateTableRequest createTableRequest) {
     String tableName = createTableRequest.name();
-    if (purgeManager != null
-        && purgeManager.isNameOccupied(context.catalogName(), namespace.toString(), tableName)) {
+    if (purgeManager
+        .map(
+            manager ->
+                manager.isNameOccupied(context.catalogName(), namespace.toString(), tableName))
+        .orElse(false)) {
       throw new AlreadyExistsException(
           "Table %s.%s is being purged; retry after cleanup completes", namespace, tableName);
     }
@@ -133,29 +137,34 @@ public class IcebergTableOperationExecutor implements IcebergTableOperationDispa
 
     // Async purge is opt-in per request and only available when the purge manager is wired
     // in auxiliary mode. Standalone mode falls back to synchronous purge.
-    if (!context.asyncPurge() || purgeManager == null) {
+    if (!context.asyncPurge()) {
       wrapper.purgeTable(tableIdentifier);
       return;
     }
 
-    // Snapshot the metadata location before dropping the catalog entry, then enqueue the cleanup
-    // job. There is a small window between dropTable and enqueue in which isNameOccupied() returns
-    // false, so a concurrent createTable/registerTable for the same identifier can succeed. This is
-    // safe: the recreated table is assigned a fresh metadata location, so the enqueued job only
-    // deletes files reachable from the dropped table's old metadata, never the new table's files.
-    TableMetadata metadata = wrapper.loadTableMetadata(tableIdentifier);
-    wrapper.dropTable(tableIdentifier);
-    purgeManager.enqueue(
-        new IcebergPurgeJob(
-            0L,
-            IcebergRESTServerContext.getInstance().metalakeName(),
-            context.catalogName(),
-            tableIdentifier.namespace().toString(),
-            tableIdentifier.name(),
-            metadata.metadataFileLocation(),
-            wrapper.fileIoImpl(),
-            wrapper.fileIoProperties(),
-            context.userName()));
+    purgeManager.ifPresentOrElse(
+        manager -> {
+          // Snapshot the metadata location before dropping the catalog entry, then enqueue the
+          // cleanup job. There is a small window between dropTable and enqueue in which
+          // isNameOccupied() returns false, so a concurrent createTable/registerTable for the
+          // same identifier can succeed. This is safe: the recreated table is assigned a fresh
+          // metadata location, so the enqueued job only deletes files reachable from the dropped
+          // table's old metadata, never the new table's files.
+          TableMetadata metadata = wrapper.loadTableMetadata(tableIdentifier);
+          wrapper.dropTable(tableIdentifier);
+          manager.enqueue(
+              new IcebergPurgeJob(
+                  0L,
+                  IcebergRESTServerContext.getInstance().metalakeName(),
+                  context.catalogName(),
+                  tableIdentifier.namespace().toString(),
+                  tableIdentifier.name(),
+                  metadata.metadataFileLocation(),
+                  wrapper.fileIoImpl(),
+                  wrapper.fileIoProperties(),
+                  context.userName()));
+        },
+        () -> wrapper.purgeTable(tableIdentifier));
   }
 
   @Override

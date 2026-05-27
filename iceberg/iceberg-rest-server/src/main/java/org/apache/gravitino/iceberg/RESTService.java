@@ -21,6 +21,7 @@ package org.apache.gravitino.iceberg;
 import com.google.common.collect.Lists;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import javax.inject.Singleton;
 import javax.servlet.Servlet;
 import org.apache.gravitino.Configs;
@@ -78,7 +79,7 @@ public class RESTService implements GravitinoAuxiliaryService {
 
   private IcebergCatalogWrapperManager icebergCatalogWrapperManager;
   private IcebergMetricsManager icebergMetricsManager;
-  private IcebergPurgeManager purgeManager;
+  private Optional<IcebergPurgeManager> purgeManager = Optional.empty();
   private IcebergConfigProvider configProvider;
   private boolean auxMode;
 
@@ -125,12 +126,15 @@ public class RESTService implements GravitinoAuxiliaryService {
     if (auxMode) {
       // Async purge reuses the entity store's shared relational backend (connection pool +
       // per-backend SQL), which is only available when running embedded in the Gravitino server
-      // (auxiliary mode). In standalone mode the purge manager stays null and purge requests fall
+      // (auxiliary mode). In standalone mode the purge manager stays empty and purge requests fall
       // back to synchronous purge.
       this.purgeManager =
-          new IcebergPurgeManager(
-              new IcebergPurgeJobStore(GravitinoEnv.getInstance().idGenerator()), icebergConfig);
+          Optional.of(
+              new IcebergPurgeManager(
+                  new IcebergPurgeJobStore(GravitinoEnv.getInstance().idGenerator()),
+                  icebergConfig));
     } else {
+      this.purgeManager = Optional.empty();
       LOG.info(
           "Async Iceberg table purge is only available in auxiliary mode; "
               + "purge requests fall back to synchronous purge.");
@@ -179,9 +183,8 @@ public class RESTService implements GravitinoAuxiliaryService {
             }
             bind(icebergCatalogWrapperManager).to(IcebergCatalogWrapperManager.class).ranked(1);
             bind(icebergMetricsManager).to(IcebergMetricsManager.class).ranked(1);
-            if (purgeManager != null) {
-              bind(purgeManager).to(IcebergPurgeManager.class).ranked(1);
-            }
+            purgeManager.ifPresent(
+                manager -> bind(manager).to(IcebergPurgeManager.class).ranked(1));
             bind(icebergTableDispatcher).to(IcebergTableOperationDispatcher.class).ranked(1);
             bind(icebergViewDispatcher).to(IcebergViewOperationDispatcher.class).ranked(1);
             bind(icebergNamespaceDispatcher)
@@ -217,9 +220,7 @@ public class RESTService implements GravitinoAuxiliaryService {
   @Override
   public void serviceStart() {
     icebergMetricsManager.start();
-    if (purgeManager != null) {
-      purgeManager.start();
-    }
+    purgeManager.ifPresent(IcebergPurgeManager::start);
     if (server != null) {
       try {
         server.start();
@@ -245,9 +246,7 @@ public class RESTService implements GravitinoAuxiliaryService {
     if (icebergMetricsManager != null) {
       icebergMetricsManager.close();
     }
-    if (purgeManager != null) {
-      purgeManager.close();
-    }
+    purgeManager.ifPresent(IcebergPurgeManager::close);
   }
 
   public void join() {

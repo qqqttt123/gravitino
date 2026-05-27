@@ -113,6 +113,17 @@ class TestIcebergPurgeManager {
   }
 
   @Test
+  void testDeleteAllIgnoresAlreadyDeletedBulkFiles() {
+    IcebergPurgeManager svc = new IcebergPurgeManager(store, new IcebergConfig(new HashMap<>()));
+    try {
+      Assertions.assertDoesNotThrow(
+          () -> svc.deleteAll(new MissingBulkFileIO(), Arrays.asList("already-gone")));
+    } finally {
+      svc.close();
+    }
+  }
+
+  @Test
   void testPurgeFilesDeletesAllReachableFiles() throws Exception {
     InMemoryCatalog catalog = new InMemoryCatalog();
     catalog.initialize("test", ImmutableMap.of());
@@ -245,6 +256,13 @@ class TestIcebergPurgeManager {
       for (String path : paths) {
         deleted.add(path);
       }
+    }
+  }
+
+  private static class MissingBulkFileIO extends MissingFileIO implements SupportsBulkOperations {
+    @Override
+    public void deleteFiles(Iterable<String> paths) {
+      throw new NotFoundException("Missing files");
     }
   }
 

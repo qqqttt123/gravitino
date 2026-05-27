@@ -27,6 +27,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.logging.Level;
 import java.util.stream.Stream;
 import javax.servlet.http.HttpServletRequest;
@@ -143,7 +144,7 @@ public class IcebergRestTestUtil {
 
       IcebergTableOperationExecutor icebergTableOperationExecutor =
           new IcebergTableOperationExecutor(
-              icebergCatalogWrapperManager, mock(IcebergPurgeManager.class));
+              icebergCatalogWrapperManager, Optional.of(mock(IcebergPurgeManager.class)));
       IcebergTableEventDispatcher icebergTableEventDispatcher =
           new IcebergTableEventDispatcher(
               icebergTableOperationExecutor, eventBus, configProvider.getMetalakeName());
@@ -154,7 +155,7 @@ public class IcebergRestTestUtil {
               icebergViewOperationExecutor, eventBus, configProvider.getMetalakeName());
       IcebergNamespaceOperationExecutor icebergNamespaceOperationExecutor =
           new IcebergNamespaceOperationExecutor(
-              icebergCatalogWrapperManager, mock(IcebergPurgeManager.class));
+              icebergCatalogWrapperManager, Optional.of(mock(IcebergPurgeManager.class)));
       IcebergNamespaceEventDispatcher icebergNamespaceEventDispatcher =
           new IcebergNamespaceEventDispatcher(
               icebergNamespaceOperationExecutor, eventBus, configProvider.getMetalakeName());

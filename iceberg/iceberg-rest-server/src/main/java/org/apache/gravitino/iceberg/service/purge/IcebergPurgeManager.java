@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -181,10 +182,25 @@ public class IcebergPurgeManager implements AutoCloseable {
       } catch (InterruptedException e) {
         Thread.currentThread().interrupt();
         throw new RuntimeException("Interrupted during bulk delete", e);
-      } catch (Exception e) {
+      } catch (ExecutionException e) {
+        if (hasCause(e, NotFoundException.class)) {
+          LOG.debug("Ignoring already-deleted file during async purge", e);
+          continue;
+        }
         throw new RuntimeException("Bulk delete batch failed", e);
       }
     }
+  }
+
+  private static boolean hasCause(Throwable throwable, Class<? extends Throwable> type) {
+    Throwable current = throwable;
+    while (current != null) {
+      if (type.isInstance(current)) {
+        return true;
+      }
+      current = current.getCause();
+    }
+    return false;
   }
 
   private void workerLoop() {

@@ -28,6 +28,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.Collections;
+import java.util.Optional;
 import org.apache.gravitino.iceberg.service.CatalogWrapperForREST;
 import org.apache.gravitino.iceberg.service.IcebergCatalogWrapperManager;
 import org.apache.gravitino.iceberg.service.authorization.IcebergRESTServerContext;
@@ -54,7 +55,7 @@ class TestIcebergTableOperationExecutorAsyncPurge {
   }
 
   private IcebergTableOperationExecutor newExec(
-      CatalogWrapperForREST wrapper, IcebergPurgeManager purgeManager) {
+      CatalogWrapperForREST wrapper, Optional<IcebergPurgeManager> purgeManager) {
     IcebergCatalogWrapperManager manager = mock(IcebergCatalogWrapperManager.class);
     when(manager.getCatalogWrapper("cat")).thenReturn(wrapper);
     return new IcebergTableOperationExecutor(manager, purgeManager);
@@ -76,7 +77,7 @@ class TestIcebergTableOperationExecutorAsyncPurge {
     when(context.asyncPurge()).thenReturn(true);
 
     TableIdentifier identifier = TableIdentifier.of("db", "t");
-    newExec(wrapper, purgeManager).dropTable(context, identifier, true);
+    newExec(wrapper, Optional.of(purgeManager)).dropTable(context, identifier, true);
 
     InOrder ordered = inOrder(wrapper, purgeManager);
     ordered.verify(wrapper).loadTableMetadata(identifier);
@@ -104,7 +105,7 @@ class TestIcebergTableOperationExecutorAsyncPurge {
     when(context.asyncPurge()).thenReturn(false);
 
     TableIdentifier identifier = TableIdentifier.of("db", "t");
-    newExec(wrapper, purgeManager).dropTable(context, identifier, true);
+    newExec(wrapper, Optional.of(purgeManager)).dropTable(context, identifier, true);
 
     verify(wrapper).purgeTable(identifier);
     verify(purgeManager, never()).enqueue(any());
@@ -118,8 +119,8 @@ class TestIcebergTableOperationExecutorAsyncPurge {
     when(context.asyncPurge()).thenReturn(true);
 
     TableIdentifier identifier = TableIdentifier.of("db", "t");
-    // A null purge service models async purge disabled on the server.
-    newExec(wrapper, null).dropTable(context, identifier, true);
+    // An empty purge service models async purge disabled on the server.
+    newExec(wrapper, Optional.empty()).dropTable(context, identifier, true);
 
     verify(wrapper).purgeTable(identifier);
     verify(wrapper, never()).loadTableMetadata(any());
@@ -133,7 +134,7 @@ class TestIcebergTableOperationExecutorAsyncPurge {
     when(context.catalogName()).thenReturn("cat");
 
     TableIdentifier identifier = TableIdentifier.of("db", "t");
-    newExec(wrapper, purgeManager).dropTable(context, identifier, false);
+    newExec(wrapper, Optional.of(purgeManager)).dropTable(context, identifier, false);
 
     verify(wrapper).dropTable(identifier);
     verify(purgeManager, never()).enqueue(any());

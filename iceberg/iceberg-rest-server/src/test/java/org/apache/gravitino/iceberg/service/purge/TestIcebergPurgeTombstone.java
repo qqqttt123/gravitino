@@ -26,6 +26,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.HashMap;
+import java.util.Optional;
 import org.apache.gravitino.iceberg.common.IcebergConfig;
 import org.apache.gravitino.iceberg.service.CatalogWrapperForREST;
 import org.apache.gravitino.iceberg.service.IcebergCatalogWrapperManager;
@@ -114,11 +115,11 @@ class TestIcebergPurgeTombstone {
   }
 
   private IcebergTableOperationExecutor newTableExecutor() {
-    return new IcebergTableOperationExecutor(wrapperManager(), purgeManager);
+    return new IcebergTableOperationExecutor(wrapperManager(), Optional.of(purgeManager));
   }
 
   private IcebergNamespaceOperationExecutor newNamespaceExecutor() {
-    return new IcebergNamespaceOperationExecutor(wrapperManager(), purgeManager);
+    return new IcebergNamespaceOperationExecutor(wrapperManager(), Optional.of(purgeManager));
   }
 
   private IcebergCatalogWrapperManager wrapperManager() {
