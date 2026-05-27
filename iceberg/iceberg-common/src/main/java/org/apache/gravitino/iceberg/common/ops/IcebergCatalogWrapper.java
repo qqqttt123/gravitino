@@ -44,6 +44,7 @@ import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.catalog.SupportsNamespaces;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.catalog.ViewCatalog;
+import org.apache.iceberg.io.ResolvingFileIO;
 import org.apache.iceberg.jdbc.JdbcCatalogWithMetadataLocationSupport;
 import org.apache.iceberg.rest.CatalogHandlers;
 import org.apache.iceberg.rest.RESTCatalog;
@@ -257,7 +258,7 @@ public class IcebergCatalogWrapper implements AutoCloseable {
    */
   public String fileIoImpl() {
     String impl = icebergConfig.get(IcebergConfig.IO_IMPL);
-    return StringUtils.isNotBlank(impl) ? impl : "org.apache.iceberg.io.ResolvingFileIO";
+    return StringUtils.isNotBlank(impl) ? impl : ResolvingFileIO.class.getName();
   }
 
   /**

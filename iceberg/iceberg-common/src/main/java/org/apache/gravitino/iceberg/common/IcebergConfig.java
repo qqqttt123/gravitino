@@ -316,11 +316,23 @@ public class IcebergConfig extends Config implements OverwriteDefaultConfig {
           .checkValue(value -> value > 0, ConfigConstants.POSITIVE_NUMBER_ERROR_MSG)
           .createWithDefault(60);
 
+  public static final ConfigEntry<Boolean> ASYNC_PURGE_ENABLED =
+      new ConfigBuilder("async-purge.enabled")
+          .doc(
+              "Whether the asynchronous table purge engine is enabled. When false, the purge"
+                  + " worker threads and the backend job store are not started, and async purge"
+                  + " requests fall back to synchronous purge. Enabling it requires the Gravitino"
+                  + " relational backend to be initialized with the iceberg_cleanup_job table.")
+          .version(ConfigConstants.VERSION_1_3_0)
+          .booleanConf()
+          .createWithDefault(false);
+
   public static final ConfigEntry<Integer> ASYNC_PURGE_WORKER_THREADS =
       new ConfigBuilder("async-purge.worker-threads")
           .doc("Worker pool size per server (concurrent async purge jobs).")
           .version(ConfigConstants.VERSION_1_3_0)
           .intConf()
+          .checkValue(value -> value > 0, ConfigConstants.POSITIVE_NUMBER_ERROR_MSG)
           .createWithDefault(2);
 
   public static final ConfigEntry<Integer> ASYNC_PURGE_DELETE_THREADS =
@@ -328,6 +340,7 @@ public class IcebergConfig extends Config implements OverwriteDefaultConfig {
           .doc("Server-wide file-delete pool size, shared across all purge jobs.")
           .version(ConfigConstants.VERSION_1_3_0)
           .intConf()
+          .checkValue(value -> value > 0, ConfigConstants.POSITIVE_NUMBER_ERROR_MSG)
           .createWithDefault(4);
 
   public static final ConfigEntry<Integer> ASYNC_PURGE_DELETE_BATCH_SIZE =
@@ -335,6 +348,7 @@ public class IcebergConfig extends Config implements OverwriteDefaultConfig {
           .doc("Files per bulk-delete batch handed to the delete executor.")
           .version(ConfigConstants.VERSION_1_3_0)
           .intConf()
+          .checkValue(value -> value > 0, ConfigConstants.POSITIVE_NUMBER_ERROR_MSG)
           .createWithDefault(1000);
 
   public static final ConfigEntry<Long> ASYNC_PURGE_POLL_INTERVAL_MS =
@@ -342,6 +356,7 @@ public class IcebergConfig extends Config implements OverwriteDefaultConfig {
           .doc("Worker poll interval in milliseconds; also the retry interval.")
           .version(ConfigConstants.VERSION_1_3_0)
           .longConf()
+          .checkValue(value -> value > 0, ConfigConstants.POSITIVE_NUMBER_ERROR_MSG)
           .createWithDefault(5000L);
 
   public static final ConfigEntry<Long> ASYNC_PURGE_HEARTBEAT_TIMEOUT_MS =
@@ -349,6 +364,7 @@ public class IcebergConfig extends Config implements OverwriteDefaultConfig {
           .doc("Age in milliseconds after which a job with no heartbeat is reclaimable.")
           .version(ConfigConstants.VERSION_1_3_0)
           .longConf()
+          .checkValue(value -> value > 0, ConfigConstants.POSITIVE_NUMBER_ERROR_MSG)
           .createWithDefault(300000L);
 
   public static final ConfigEntry<Integer> ASYNC_PURGE_MAX_ATTEMPTS =
@@ -356,6 +372,7 @@ public class IcebergConfig extends Config implements OverwriteDefaultConfig {
           .doc("Number of attempts before a purge job is marked FAILED.")
           .version(ConfigConstants.VERSION_1_3_0)
           .intConf()
+          .checkValue(value -> value > 0, ConfigConstants.POSITIVE_NUMBER_ERROR_MSG)
           .createWithDefault(5);
 
   public static final ConfigEntry<Integer> ASYNC_PURGE_RETENTION_HOURS =
@@ -363,6 +380,7 @@ public class IcebergConfig extends Config implements OverwriteDefaultConfig {
           .doc("How long terminal (SUCCEEDED/FAILED) purge rows are retained before pruning.")
           .version(ConfigConstants.VERSION_1_3_0)
           .intConf()
+          .checkValue(value -> value > 0, ConfigConstants.POSITIVE_NUMBER_ERROR_MSG)
           .createWithDefault(720);
 
   public String getJdbcDriver() {

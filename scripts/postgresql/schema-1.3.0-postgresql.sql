@@ -1056,7 +1056,7 @@ COMMENT ON COLUMN entity_change_log.operate_type IS 'Operate type code: 1=ALTER,
 COMMENT ON COLUMN entity_change_log.created_at IS 'timestamp of the change in millis';
 
 CREATE TABLE IF NOT EXISTS iceberg_cleanup_job (
-  id                BIGSERIAL     PRIMARY KEY,
+  id                BIGINT        NOT NULL PRIMARY KEY,
   metalake_name     VARCHAR(128)  NOT NULL,
   catalog_name      VARCHAR(128)  NOT NULL,
   namespace         VARCHAR(512)  NOT NULL,

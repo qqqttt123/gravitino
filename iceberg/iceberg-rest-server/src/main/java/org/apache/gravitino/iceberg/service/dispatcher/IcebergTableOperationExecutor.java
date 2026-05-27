@@ -32,7 +32,7 @@ import org.apache.gravitino.iceberg.common.utils.IcebergIdentifierUtils;
 import org.apache.gravitino.iceberg.service.IcebergCatalogWrapperManager;
 import org.apache.gravitino.iceberg.service.authorization.IcebergRESTServerContext;
 import org.apache.gravitino.iceberg.service.purge.IcebergPurgeJob;
-import org.apache.gravitino.iceberg.service.purge.IcebergPurgeService;
+import org.apache.gravitino.iceberg.service.purge.IcebergPurgeManager;
 import org.apache.gravitino.listener.api.event.IcebergRequestContext;
 import org.apache.gravitino.server.authorization.MetadataAuthzHelper;
 import org.apache.gravitino.server.authorization.expression.AuthorizationExpressionConstants;
@@ -56,20 +56,20 @@ public class IcebergTableOperationExecutor implements IcebergTableOperationDispa
   private static final Logger LOG = LoggerFactory.getLogger(IcebergTableOperationExecutor.class);
 
   private final IcebergCatalogWrapperManager icebergCatalogWrapperManager;
-  private final IcebergPurgeService purgeService;
+  private final IcebergPurgeManager purgeManager;
 
   public IcebergTableOperationExecutor(
-      IcebergCatalogWrapperManager icebergCatalogWrapperManager, IcebergPurgeService purgeService) {
+      IcebergCatalogWrapperManager icebergCatalogWrapperManager, IcebergPurgeManager purgeManager) {
     this.icebergCatalogWrapperManager = icebergCatalogWrapperManager;
-    this.purgeService = purgeService;
+    this.purgeManager = purgeManager;
   }
 
   @Override
   public LoadTableResponse createTable(
       IcebergRequestContext context, Namespace namespace, CreateTableRequest createTableRequest) {
     String tableName = createTableRequest.name();
-    if (purgeService != null
-        && purgeService.isNameOccupied(context.catalogName(), namespace.toString(), tableName)) {
+    if (purgeManager != null
+        && purgeManager.isNameOccupied(context.catalogName(), namespace.toString(), tableName)) {
       throw new AlreadyExistsException(
           "Table %s.%s is being purged; retry after cleanup completes", namespace, tableName);
     }
@@ -131,14 +131,21 @@ public class IcebergTableOperationExecutor implements IcebergTableOperationDispa
       return;
     }
 
-    if (!context.asyncPurge()) {
+    // Async purge is opt-in per request and additionally requires the purge service to be enabled
+    // on the server. When it is disabled, fall back to the synchronous purge behavior.
+    if (!context.asyncPurge() || purgeManager == null) {
       wrapper.purgeTable(tableIdentifier);
       return;
     }
 
+    // Snapshot the metadata location before dropping the catalog entry, then enqueue the cleanup
+    // job. There is a small window between dropTable and enqueue in which isNameOccupied() returns
+    // false, so a concurrent createTable/registerTable for the same identifier can succeed. This is
+    // safe: the recreated table is assigned a fresh metadata location, so the enqueued job only
+    // deletes files reachable from the dropped table's old metadata, never the new table's files.
     TableMetadata metadata = wrapper.loadTableMetadata(tableIdentifier);
     wrapper.dropTable(tableIdentifier);
-    purgeService.enqueue(
+    purgeManager.enqueue(
         new IcebergPurgeJob(
             0L,
             IcebergRESTServerContext.getInstance().metalakeName(),

@@ -33,7 +33,7 @@ import org.apache.gravitino.iceberg.service.IcebergCatalogWrapperManager;
 import org.apache.gravitino.iceberg.service.authorization.IcebergRESTServerContext;
 import org.apache.gravitino.iceberg.service.provider.IcebergConfigProvider;
 import org.apache.gravitino.iceberg.service.purge.IcebergPurgeJob;
-import org.apache.gravitino.iceberg.service.purge.IcebergPurgeService;
+import org.apache.gravitino.iceberg.service.purge.IcebergPurgeManager;
 import org.apache.gravitino.listener.api.event.IcebergRequestContext;
 import org.apache.iceberg.TableMetadata;
 import org.apache.iceberg.catalog.TableIdentifier;
@@ -54,16 +54,16 @@ class TestIcebergTableOperationExecutorAsyncPurge {
   }
 
   private IcebergTableOperationExecutor newExec(
-      CatalogWrapperForREST wrapper, IcebergPurgeService purgeService) {
+      CatalogWrapperForREST wrapper, IcebergPurgeManager purgeManager) {
     IcebergCatalogWrapperManager manager = mock(IcebergCatalogWrapperManager.class);
     when(manager.getCatalogWrapper("cat")).thenReturn(wrapper);
-    return new IcebergTableOperationExecutor(manager, purgeService);
+    return new IcebergTableOperationExecutor(manager, purgeManager);
   }
 
   @Test
   void testAsyncWhenHeaderTrueEnqueuesOneJob() {
     CatalogWrapperForREST wrapper = mock(CatalogWrapperForREST.class);
-    IcebergPurgeService purgeService = mock(IcebergPurgeService.class);
+    IcebergPurgeManager purgeManager = mock(IcebergPurgeManager.class);
     TableMetadata metadata = mock(TableMetadata.class);
     when(metadata.metadataFileLocation()).thenReturn("s3://bucket/db/t/metadata/00000.json");
     when(wrapper.loadTableMetadata(any())).thenReturn(metadata);
@@ -76,15 +76,15 @@ class TestIcebergTableOperationExecutorAsyncPurge {
     when(context.asyncPurge()).thenReturn(true);
 
     TableIdentifier identifier = TableIdentifier.of("db", "t");
-    newExec(wrapper, purgeService).dropTable(context, identifier, true);
+    newExec(wrapper, purgeManager).dropTable(context, identifier, true);
 
-    InOrder ordered = inOrder(wrapper, purgeService);
+    InOrder ordered = inOrder(wrapper, purgeManager);
     ordered.verify(wrapper).loadTableMetadata(identifier);
     ordered.verify(wrapper).dropTable(identifier);
-    ordered.verify(purgeService, times(1)).enqueue(any());
+    ordered.verify(purgeManager, times(1)).enqueue(any());
 
     ArgumentCaptor<IcebergPurgeJob> jobCaptor = ArgumentCaptor.forClass(IcebergPurgeJob.class);
-    verify(purgeService).enqueue(jobCaptor.capture());
+    verify(purgeManager).enqueue(jobCaptor.capture());
     IcebergPurgeJob job = jobCaptor.getValue();
     Assertions.assertEquals("metalake", job.metalakeName());
     Assertions.assertEquals("cat", job.catalogName());
@@ -98,29 +98,44 @@ class TestIcebergTableOperationExecutorAsyncPurge {
   @Test
   void testDefaultIsSynchronousPurge() {
     CatalogWrapperForREST wrapper = mock(CatalogWrapperForREST.class);
-    IcebergPurgeService purgeService = mock(IcebergPurgeService.class);
+    IcebergPurgeManager purgeManager = mock(IcebergPurgeManager.class);
     IcebergRequestContext context = mock(IcebergRequestContext.class);
     when(context.catalogName()).thenReturn("cat");
     when(context.asyncPurge()).thenReturn(false);
 
     TableIdentifier identifier = TableIdentifier.of("db", "t");
-    newExec(wrapper, purgeService).dropTable(context, identifier, true);
+    newExec(wrapper, purgeManager).dropTable(context, identifier, true);
 
     verify(wrapper).purgeTable(identifier);
-    verify(purgeService, never()).enqueue(any());
+    verify(purgeManager, never()).enqueue(any());
+  }
+
+  @Test
+  void testAsyncHeaderButServiceDisabledFallsBackToSync() {
+    CatalogWrapperForREST wrapper = mock(CatalogWrapperForREST.class);
+    IcebergRequestContext context = mock(IcebergRequestContext.class);
+    when(context.catalogName()).thenReturn("cat");
+    when(context.asyncPurge()).thenReturn(true);
+
+    TableIdentifier identifier = TableIdentifier.of("db", "t");
+    // A null purge service models async purge disabled on the server.
+    newExec(wrapper, null).dropTable(context, identifier, true);
+
+    verify(wrapper).purgeTable(identifier);
+    verify(wrapper, never()).loadTableMetadata(any());
   }
 
   @Test
   void testNonPurgeDropIsPlainDrop() {
     CatalogWrapperForREST wrapper = mock(CatalogWrapperForREST.class);
-    IcebergPurgeService purgeService = mock(IcebergPurgeService.class);
+    IcebergPurgeManager purgeManager = mock(IcebergPurgeManager.class);
     IcebergRequestContext context = mock(IcebergRequestContext.class);
     when(context.catalogName()).thenReturn("cat");
 
     TableIdentifier identifier = TableIdentifier.of("db", "t");
-    newExec(wrapper, purgeService).dropTable(context, identifier, false);
+    newExec(wrapper, purgeManager).dropTable(context, identifier, false);
 
     verify(wrapper).dropTable(identifier);
-    verify(purgeService, never()).enqueue(any());
+    verify(purgeManager, never()).enqueue(any());
   }
 }

@@ -51,7 +51,7 @@ import org.apache.gravitino.iceberg.service.metrics.IcebergMetricsManager;
 import org.apache.gravitino.iceberg.service.provider.IcebergConfigProvider;
 import org.apache.gravitino.iceberg.service.provider.IcebergConfigProviderFactory;
 import org.apache.gravitino.iceberg.service.provider.StaticIcebergConfigProvider;
-import org.apache.gravitino.iceberg.service.purge.IcebergPurgeService;
+import org.apache.gravitino.iceberg.service.purge.IcebergPurgeManager;
 import org.apache.gravitino.listener.EventBus;
 import org.apache.gravitino.listener.api.EventListenerPlugin;
 import org.apache.iceberg.catalog.Namespace;
@@ -143,7 +143,7 @@ public class IcebergRestTestUtil {
 
       IcebergTableOperationExecutor icebergTableOperationExecutor =
           new IcebergTableOperationExecutor(
-              icebergCatalogWrapperManager, mock(IcebergPurgeService.class));
+              icebergCatalogWrapperManager, mock(IcebergPurgeManager.class));
       IcebergTableEventDispatcher icebergTableEventDispatcher =
           new IcebergTableEventDispatcher(
               icebergTableOperationExecutor, eventBus, configProvider.getMetalakeName());
@@ -154,7 +154,7 @@ public class IcebergRestTestUtil {
               icebergViewOperationExecutor, eventBus, configProvider.getMetalakeName());
       IcebergNamespaceOperationExecutor icebergNamespaceOperationExecutor =
           new IcebergNamespaceOperationExecutor(
-              icebergCatalogWrapperManager, mock(IcebergPurgeService.class));
+              icebergCatalogWrapperManager, mock(IcebergPurgeManager.class));
       IcebergNamespaceEventDispatcher icebergNamespaceEventDispatcher =
           new IcebergNamespaceEventDispatcher(
               icebergNamespaceOperationExecutor, eventBus, configProvider.getMetalakeName());

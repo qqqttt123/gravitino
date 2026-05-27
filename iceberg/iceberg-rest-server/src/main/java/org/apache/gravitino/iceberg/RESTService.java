@@ -19,16 +19,13 @@
 package org.apache.gravitino.iceberg;
 
 import com.google.common.collect.Lists;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import javax.inject.Singleton;
 import javax.servlet.Servlet;
-import org.apache.gravitino.Config;
 import org.apache.gravitino.Configs;
 import org.apache.gravitino.GravitinoEnv;
 import org.apache.gravitino.auxiliary.GravitinoAuxiliaryService;
-import org.apache.gravitino.catalog.lakehouse.iceberg.IcebergConstants;
 import org.apache.gravitino.iceberg.common.IcebergConfig;
 import org.apache.gravitino.iceberg.service.IcebergAuthenticationFilter;
 import org.apache.gravitino.iceberg.service.IcebergCatalogWrapperManager;
@@ -51,7 +48,7 @@ import org.apache.gravitino.iceberg.service.metrics.IcebergMetricsManager;
 import org.apache.gravitino.iceberg.service.provider.IcebergConfigProvider;
 import org.apache.gravitino.iceberg.service.provider.IcebergConfigProviderFactory;
 import org.apache.gravitino.iceberg.service.purge.IcebergPurgeJobStore;
-import org.apache.gravitino.iceberg.service.purge.IcebergPurgeService;
+import org.apache.gravitino.iceberg.service.purge.IcebergPurgeManager;
 import org.apache.gravitino.listener.EventBus;
 import org.apache.gravitino.metrics.MetricsSystem;
 import org.apache.gravitino.metrics.source.MetricsSource;
@@ -60,7 +57,6 @@ import org.apache.gravitino.server.web.HttpServerMetricsSource;
 import org.apache.gravitino.server.web.JettyServer;
 import org.apache.gravitino.server.web.JettyServerConfig;
 import org.apache.gravitino.server.web.filter.IcebergRESTAuthInterceptionService;
-import org.apache.iceberg.jdbc.JdbcClientPool;
 import org.glassfish.hk2.api.InterceptionService;
 import org.glassfish.hk2.utilities.binding.AbstractBinder;
 import org.glassfish.jersey.jackson.JacksonFeature;
@@ -82,7 +78,7 @@ public class RESTService implements GravitinoAuxiliaryService {
 
   private IcebergCatalogWrapperManager icebergCatalogWrapperManager;
   private IcebergMetricsManager icebergMetricsManager;
-  private IcebergPurgeService purgeService;
+  private IcebergPurgeManager purgeManager;
   private IcebergConfigProvider configProvider;
   private boolean auxMode;
 
@@ -126,11 +122,19 @@ public class RESTService implements GravitinoAuxiliaryService {
             skipAuthorizationForRestBackend,
             icebergCatalogWrapperManager);
     this.icebergMetricsManager = new IcebergMetricsManager(icebergConfig);
-    this.purgeService =
-        new IcebergPurgeService(new IcebergPurgeJobStore(buildBackendJdbcPool()), icebergConfig);
+    if (icebergConfig.get(IcebergConfig.ASYNC_PURGE_ENABLED)) {
+      // Reuse the entity store's shared relational backend (connection pool + per-backend SQL)
+      // instead of opening a dedicated JDBC pool here.
+      this.purgeManager =
+          new IcebergPurgeManager(
+              new IcebergPurgeJobStore(GravitinoEnv.getInstance().idGenerator()), icebergConfig);
+    } else {
+      LOG.info(
+          "Async Iceberg table purge is disabled; purge requests fall back to synchronous purge.");
+    }
     // Table: HookDispatcher -> EventDispatcher -> OperationExecutor
     IcebergTableOperationDispatcher icebergTableOperationDispatcher =
-        new IcebergTableOperationExecutor(icebergCatalogWrapperManager, purgeService);
+        new IcebergTableOperationExecutor(icebergCatalogWrapperManager, purgeManager);
     IcebergTableOperationDispatcher icebergTableEventDispatcher =
         new IcebergTableEventDispatcher(icebergTableOperationDispatcher, eventBus, metalakeName);
     if (authorizationContext.isAuthorizationEnabled()) {
@@ -151,7 +155,7 @@ public class RESTService implements GravitinoAuxiliaryService {
 
     // Namespace: HookDispatcher -> EventDispatcher -> OperationExecutor
     IcebergNamespaceOperationDispatcher namespaceOperationDispatcher =
-        new IcebergNamespaceOperationExecutor(icebergCatalogWrapperManager, purgeService);
+        new IcebergNamespaceOperationExecutor(icebergCatalogWrapperManager, purgeManager);
     IcebergNamespaceOperationDispatcher icebergNamespaceEventDispatcher =
         new IcebergNamespaceEventDispatcher(namespaceOperationDispatcher, eventBus, metalakeName);
     if (authorizationContext.isAuthorizationEnabled()) {
@@ -172,7 +176,9 @@ public class RESTService implements GravitinoAuxiliaryService {
             }
             bind(icebergCatalogWrapperManager).to(IcebergCatalogWrapperManager.class).ranked(1);
             bind(icebergMetricsManager).to(IcebergMetricsManager.class).ranked(1);
-            bind(purgeService).to(IcebergPurgeService.class).ranked(1);
+            if (purgeManager != null) {
+              bind(purgeManager).to(IcebergPurgeManager.class).ranked(1);
+            }
             bind(icebergTableDispatcher).to(IcebergTableOperationDispatcher.class).ranked(1);
             bind(icebergViewDispatcher).to(IcebergViewOperationDispatcher.class).ranked(1);
             bind(icebergNamespaceDispatcher)
@@ -208,7 +214,9 @@ public class RESTService implements GravitinoAuxiliaryService {
   @Override
   public void serviceStart() {
     icebergMetricsManager.start();
-    purgeService.start();
+    if (purgeManager != null) {
+      purgeManager.start();
+    }
     if (server != null) {
       try {
         server.start();
@@ -234,8 +242,8 @@ public class RESTService implements GravitinoAuxiliaryService {
     if (icebergMetricsManager != null) {
       icebergMetricsManager.close();
     }
-    if (purgeService != null) {
-      purgeService.close();
+    if (purgeManager != null) {
+      purgeManager.close();
     }
   }
 
@@ -243,25 +251,6 @@ public class RESTService implements GravitinoAuxiliaryService {
     if (server != null) {
       server.join();
     }
-  }
-
-  private JdbcClientPool buildBackendJdbcPool() {
-    Config config = GravitinoEnv.getInstance().config();
-    String driver = config.get(Configs.ENTITY_RELATIONAL_JDBC_BACKEND_DRIVER);
-    try {
-      Class.forName(driver);
-    } catch (ClassNotFoundException e) {
-      throw new RuntimeException("Failed to load backend JDBC driver " + driver, e);
-    }
-
-    Map<String, String> properties = new HashMap<>();
-    properties.put(
-        IcebergConstants.ICEBERG_JDBC_USER,
-        config.get(Configs.ENTITY_RELATIONAL_JDBC_BACKEND_USER));
-    properties.put(
-        IcebergConstants.ICEBERG_JDBC_PASSWORD,
-        config.get(Configs.ENTITY_RELATIONAL_JDBC_BACKEND_PASSWORD));
-    return new JdbcClientPool(config.get(Configs.ENTITY_RELATIONAL_JDBC_BACKEND_URL), properties);
   }
 
   private String[] getIcebergRESTPackages(IcebergConfig icebergConfig) {

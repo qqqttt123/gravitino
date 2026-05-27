@@ -30,7 +30,7 @@ import java.util.Map;
 import org.apache.gravitino.catalog.lakehouse.iceberg.IcebergConstants;
 import org.apache.gravitino.iceberg.service.CatalogWrapperForREST;
 import org.apache.gravitino.iceberg.service.IcebergCatalogWrapperManager;
-import org.apache.gravitino.iceberg.service.purge.IcebergPurgeService;
+import org.apache.gravitino.iceberg.service.purge.IcebergPurgeManager;
 import org.apache.gravitino.listener.api.event.IcebergRequestContext;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.catalog.Namespace;
@@ -58,7 +58,7 @@ public class TestIcebergTableOperationExecutor {
     mockWrapperManager = mock(IcebergCatalogWrapperManager.class);
     mockCatalogWrapper = mock(CatalogWrapperForREST.class);
     executor =
-        new IcebergTableOperationExecutor(mockWrapperManager, mock(IcebergPurgeService.class));
+        new IcebergTableOperationExecutor(mockWrapperManager, mock(IcebergPurgeManager.class));
 
     mockContext = mock(IcebergRequestContext.class);
     when(mockContext.catalogName()).thenReturn("test_catalog");

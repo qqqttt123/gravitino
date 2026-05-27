@@ -21,72 +21,34 @@ package org.apache.gravitino.iceberg.service.purge;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.google.common.annotations.VisibleForTesting;
-import java.sql.Connection;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.Statement;
-import java.util.ArrayList;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.List;
 import java.util.Map;
 import org.apache.gravitino.json.JsonUtils;
-import org.apache.iceberg.jdbc.JdbcClientPool;
-import org.apache.iceberg.jdbc.UncheckedInterruptedException;
-import org.apache.iceberg.jdbc.UncheckedSQLException;
+import org.apache.gravitino.storage.IdGenerator;
+import org.apache.gravitino.storage.relational.utils.SessionUtils;
 
-/** JDBC persistence for {@code iceberg_cleanup_job}. */
-public class IcebergPurgeJobStore implements AutoCloseable {
+/**
+ * Persistence for {@code iceberg_cleanup_job}, layered on the Gravitino entity store's shared
+ * relational backend. All access goes through {@link IcebergPurgeJobMapper} and {@link
+ * SessionUtils}, so async purge reuses the entity store's connection pool, transaction management,
+ * and per-backend SQL dispatch rather than opening its own JDBC connections. Row ids are generated
+ * by the application {@link IdGenerator}, matching the rest of the relational store.
+ */
+public class IcebergPurgeJobStore {
 
-  private static final String INSERT_SQL =
-      "INSERT INTO iceberg_cleanup_job (metalake_name, catalog_name, namespace, table_name,"
-          + " metadata_location, file_io_impl, file_io_props, state, attempts, created_by,"
-          + " updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING', 0, ?, ?)";
+  private static final int MAX_ERROR_LENGTH = 2048;
 
-  private static final String SCAN_SQL =
-      "SELECT id FROM iceberg_cleanup_job WHERE state = 'PENDING'"
-          + " OR (state = 'RUNNING' AND (heartbeat_at IS NULL OR heartbeat_at < ?))"
-          + " ORDER BY updated_at LIMIT ?";
-
-  private static final String CLAIM_SQL =
-      "UPDATE iceberg_cleanup_job SET state = 'RUNNING', heartbeat_at = ?, updated_at = ?"
-          + " WHERE id = ? AND (state = 'PENDING'"
-          + " OR (state = 'RUNNING' AND (heartbeat_at IS NULL OR heartbeat_at < ?)))";
-
-  private static final String SELECT_SQL = "SELECT * FROM iceberg_cleanup_job WHERE id = ?";
-
-  private static final String SUCCEED_SQL =
-      "UPDATE iceberg_cleanup_job SET state = 'SUCCEEDED', heartbeat_at = NULL, updated_at = ?"
-          + " WHERE id = ? AND state = 'RUNNING'";
-
-  private static final String FAIL_SQL =
-      "UPDATE iceberg_cleanup_job SET state = 'FAILED', last_error = ?, heartbeat_at = NULL,"
-          + " updated_at = ? WHERE id = ?";
-
-  private static final String RECORD_FAILURE_SQL =
-      "UPDATE iceberg_cleanup_job SET attempts = attempts + 1, last_error = ?,"
-          + " state = CASE WHEN attempts + 1 >= ? THEN 'FAILED' ELSE 'PENDING' END,"
-          + " heartbeat_at = NULL, updated_at = ? WHERE id = ? AND state = 'RUNNING'";
-
-  private static final String HEARTBEAT_SQL =
-      "UPDATE iceberg_cleanup_job SET heartbeat_at = ?, updated_at = ?"
-          + " WHERE id = ? AND state = 'RUNNING' AND heartbeat_at = ?";
-
-  private static final String HAS_ACTIVE_SQL =
-      "SELECT 1 FROM iceberg_cleanup_job WHERE catalog_name = ? AND namespace = ?"
-          + " AND table_name = ? AND state IN ('PENDING', 'RUNNING') LIMIT 1";
-
-  private static final String PRUNE_SQL =
-      "DELETE FROM iceberg_cleanup_job WHERE state IN ('SUCCEEDED', 'FAILED') AND updated_at < ?";
-
-  private final JdbcClientPool connections;
+  private final IdGenerator idGenerator;
 
   /**
    * Creates a purge job store.
    *
-   * @param connections JDBC pool over the Gravitino backend database
+   * @param idGenerator generator for new row ids
    */
-  public IcebergPurgeJobStore(JdbcClientPool connections) {
-    this.connections = connections;
+  public IcebergPurgeJobStore(IdGenerator idGenerator) {
+    this.idGenerator = idGenerator;
   }
 
   /**
@@ -96,28 +58,11 @@ public class IcebergPurgeJobStore implements AutoCloseable {
    * @return generated id
    */
   public long enqueue(IcebergPurgeJob job) {
+    long id = idGenerator.nextId();
     long now = System.currentTimeMillis();
-    String props = writeProps(job.fileIoProperties());
-    return run(
-        conn -> {
-          try (PreparedStatement ps =
-              conn.prepareStatement(INSERT_SQL, Statement.RETURN_GENERATED_KEYS)) {
-            ps.setString(1, job.metalakeName());
-            ps.setString(2, job.catalogName());
-            ps.setString(3, job.namespace());
-            ps.setString(4, job.tableName());
-            ps.setString(5, job.metadataLocation());
-            ps.setString(6, job.fileIoImpl());
-            ps.setString(7, props);
-            ps.setString(8, job.createdBy());
-            ps.setLong(9, now);
-            ps.executeUpdate();
-            try (ResultSet keys = ps.getGeneratedKeys()) {
-              keys.next();
-              return keys.getLong(1);
-            }
-          }
-        });
+    IcebergPurgeJobPO po = toPO(job, id, now);
+    SessionUtils.doWithCommit(IcebergPurgeJobMapper.class, mapper -> mapper.insertPurgeJob(po));
+    return id;
   }
 
   /**
@@ -130,32 +75,21 @@ public class IcebergPurgeJobStore implements AutoCloseable {
    */
   public IcebergPurgeJob claimNext(long now, long heartbeatTimeoutMs, int window) {
     long staleBefore = now - heartbeatTimeoutMs;
-    return run(
-        conn -> {
-          List<Long> ids = new ArrayList<>();
-          try (PreparedStatement ps = conn.prepareStatement(SCAN_SQL)) {
-            ps.setLong(1, staleBefore);
-            ps.setInt(2, window);
-            try (ResultSet rs = ps.executeQuery()) {
-              while (rs.next()) {
-                ids.add(rs.getLong(1));
-              }
-            }
-          }
-
-          for (long id : ids) {
-            try (PreparedStatement ps = conn.prepareStatement(CLAIM_SQL)) {
-              ps.setLong(1, now);
-              ps.setLong(2, now);
-              ps.setLong(3, id);
-              ps.setLong(4, staleBefore);
-              if (ps.executeUpdate() == 1) {
-                return readJob(conn, id);
-              }
-            }
-          }
-          return null;
-        });
+    List<Long> ids =
+        SessionUtils.getWithoutCommit(
+            IcebergPurgeJobMapper.class, mapper -> mapper.selectClaimableIds(staleBefore, window));
+    for (long id : ids) {
+      int claimed =
+          SessionUtils.doWithCommitAndFetchResult(
+              IcebergPurgeJobMapper.class, mapper -> mapper.claim(id, now, staleBefore));
+      if (claimed == 1) {
+        IcebergPurgeJobPO po =
+            SessionUtils.getWithoutCommit(
+                IcebergPurgeJobMapper.class, mapper -> mapper.selectById(id));
+        return fromPO(po);
+      }
+    }
+    return null;
   }
 
   /**
@@ -165,18 +99,11 @@ public class IcebergPurgeJobStore implements AutoCloseable {
    */
   public void markSucceeded(long id) {
     long now = System.currentTimeMillis();
-    run(
-        conn -> {
-          try (PreparedStatement ps = conn.prepareStatement(SUCCEED_SQL)) {
-            ps.setLong(1, now);
-            ps.setLong(2, id);
-            return ps.executeUpdate();
-          }
-        });
+    SessionUtils.doWithCommit(IcebergPurgeJobMapper.class, mapper -> mapper.markSucceeded(id, now));
   }
 
   /**
-   * Marks a job FAILED immediately.
+   * Marks a RUNNING job FAILED immediately.
    *
    * @param id job id
    * @param reason failure text
@@ -184,15 +111,8 @@ public class IcebergPurgeJobStore implements AutoCloseable {
   public void markFailed(long id, String reason) {
     long now = System.currentTimeMillis();
     String err = truncate(reason);
-    run(
-        conn -> {
-          try (PreparedStatement ps = conn.prepareStatement(FAIL_SQL)) {
-            ps.setString(1, err);
-            ps.setLong(2, now);
-            ps.setLong(3, id);
-            return ps.executeUpdate();
-          }
-        });
+    SessionUtils.doWithCommit(
+        IcebergPurgeJobMapper.class, mapper -> mapper.markFailed(id, err, now));
   }
 
   /**
@@ -205,16 +125,8 @@ public class IcebergPurgeJobStore implements AutoCloseable {
   public void recordFailure(long id, String reason, int maxAttempts) {
     long now = System.currentTimeMillis();
     String err = truncate(reason);
-    run(
-        conn -> {
-          try (PreparedStatement ps = conn.prepareStatement(RECORD_FAILURE_SQL)) {
-            ps.setString(1, err);
-            ps.setInt(2, maxAttempts);
-            ps.setLong(3, now);
-            ps.setLong(4, id);
-            return ps.executeUpdate();
-          }
-        });
+    SessionUtils.doWithCommit(
+        IcebergPurgeJobMapper.class, mapper -> mapper.recordFailure(id, err, maxAttempts, now));
   }
 
   /**
@@ -226,16 +138,9 @@ public class IcebergPurgeJobStore implements AutoCloseable {
    * @return {@code true} iff the row was still owned by the caller
    */
   public boolean heartbeat(long id, long lastWritten, long now) {
-    return run(
-        conn -> {
-          try (PreparedStatement ps = conn.prepareStatement(HEARTBEAT_SQL)) {
-            ps.setLong(1, now);
-            ps.setLong(2, now);
-            ps.setLong(3, id);
-            ps.setLong(4, lastWritten);
-            return ps.executeUpdate() == 1;
-          }
-        });
+    return SessionUtils.doWithCommitAndFetchResult(
+            IcebergPurgeJobMapper.class, mapper -> mapper.heartbeat(id, lastWritten, now))
+        == 1;
   }
 
   /**
@@ -247,17 +152,11 @@ public class IcebergPurgeJobStore implements AutoCloseable {
    * @return true iff an active purge job exists for the identifier
    */
   public boolean hasActiveJob(String catalog, String namespace, String table) {
-    return run(
-        conn -> {
-          try (PreparedStatement ps = conn.prepareStatement(HAS_ACTIVE_SQL)) {
-            ps.setString(1, catalog);
-            ps.setString(2, namespace);
-            ps.setString(3, table);
-            try (ResultSet rs = ps.executeQuery()) {
-              return rs.next();
-            }
-          }
-        });
+    Long id =
+        SessionUtils.getWithoutCommit(
+            IcebergPurgeJobMapper.class,
+            mapper -> mapper.selectActiveJobId(catalog, namespace, table));
+    return id != null;
   }
 
   /**
@@ -267,18 +166,8 @@ public class IcebergPurgeJobStore implements AutoCloseable {
    * @return rows pruned
    */
   public int pruneTerminalBefore(long updatedBefore) {
-    return run(
-        conn -> {
-          try (PreparedStatement ps = conn.prepareStatement(PRUNE_SQL)) {
-            ps.setLong(1, updatedBefore);
-            return ps.executeUpdate();
-          }
-        });
-  }
-
-  @Override
-  public void close() {
-    connections.close();
+    return SessionUtils.doWithCommitAndFetchResult(
+        IcebergPurgeJobMapper.class, mapper -> mapper.pruneTerminalBefore(updatedBefore));
   }
 
   /**
@@ -290,73 +179,66 @@ public class IcebergPurgeJobStore implements AutoCloseable {
    */
   @VisibleForTesting
   public IcebergPurgeJob.State stateOf(long id) {
-    return run(
-        conn -> {
-          try (PreparedStatement ps =
-              conn.prepareStatement("SELECT state FROM iceberg_cleanup_job WHERE id = ?")) {
-            ps.setLong(1, id);
-            try (ResultSet rs = ps.executeQuery()) {
-              if (!rs.next()) {
-                throw new IllegalStateException("No purge job " + id);
-              }
-              return IcebergPurgeJob.State.valueOf(rs.getString(1));
-            }
-          }
-        });
+    String state =
+        SessionUtils.getWithoutCommit(
+            IcebergPurgeJobMapper.class, mapper -> mapper.selectState(id));
+    if (state == null) {
+      throw new IllegalStateException("No purge job " + id);
+    }
+    return IcebergPurgeJob.State.valueOf(state);
+  }
+
+  private IcebergPurgeJobPO toPO(IcebergPurgeJob job, long id, long now) {
+    IcebergPurgeJobPO po = new IcebergPurgeJobPO();
+    po.setId(id);
+    po.setMetalakeName(job.metalakeName());
+    po.setCatalogName(job.catalogName());
+    po.setNamespace(job.namespace());
+    po.setTableName(job.tableName());
+    po.setMetadataLocation(job.metadataLocation());
+    po.setFileIoImpl(job.fileIoImpl());
+    po.setFileIoProps(writeProps(job.fileIoProperties()));
+    po.setState(IcebergPurgeJob.State.PENDING.name());
+    po.setAttempts(0);
+    po.setLastError(null);
+    po.setHeartbeatAt(null);
+    po.setCreatedBy(job.createdBy());
+    po.setUpdatedAt(now);
+    return po;
+  }
+
+  private IcebergPurgeJob fromPO(IcebergPurgeJobPO po) {
+    return new IcebergPurgeJob(
+        po.getId(),
+        po.getMetalakeName(),
+        po.getCatalogName(),
+        po.getNamespace(),
+        po.getTableName(),
+        po.getMetadataLocation(),
+        po.getFileIoImpl(),
+        readProps(po.getFileIoProps()),
+        po.getCreatedBy());
   }
 
   private static String truncate(String value) {
-    return value == null || value.length() <= 2048 ? value : value.substring(0, 2048);
-  }
-
-  private static IcebergPurgeJob readJob(Connection conn, long id) throws SQLException {
-    try (PreparedStatement ps = conn.prepareStatement(SELECT_SQL)) {
-      ps.setLong(1, id);
-      try (ResultSet rs = ps.executeQuery()) {
-        rs.next();
-        return new IcebergPurgeJob(
-            rs.getLong("id"),
-            rs.getString("metalake_name"),
-            rs.getString("catalog_name"),
-            rs.getString("namespace"),
-            rs.getString("table_name"),
-            rs.getString("metadata_location"),
-            rs.getString("file_io_impl"),
-            readProps(rs.getString("file_io_props")),
-            rs.getString("created_by"));
-      }
-    }
+    return value == null || value.length() <= MAX_ERROR_LENGTH
+        ? value
+        : value.substring(0, MAX_ERROR_LENGTH);
   }
 
   private static String writeProps(Map<String, String> props) {
     try {
       return JsonUtils.objectMapper().writeValueAsString(props);
-    } catch (Exception e) {
-      throw new RuntimeException("Failed to serialize fileIoProperties", e);
+    } catch (IOException e) {
+      throw new UncheckedIOException("Failed to serialize fileIoProperties", e);
     }
   }
 
   private static Map<String, String> readProps(String json) {
     try {
       return JsonUtils.objectMapper().readValue(json, new TypeReference<Map<String, String>>() {});
-    } catch (Exception e) {
-      throw new RuntimeException("Failed to deserialize fileIoProperties", e);
+    } catch (IOException e) {
+      throw new UncheckedIOException("Failed to deserialize fileIoProperties", e);
     }
-  }
-
-  <R> R run(Call<R> call) {
-    try {
-      return connections.run(call::apply);
-    } catch (SQLException e) {
-      throw new UncheckedSQLException(e, "Failed purge-store SQL");
-    } catch (InterruptedException e) {
-      throw new UncheckedInterruptedException(e, "Interrupted in purge-store SQL");
-    }
-  }
-
-  /** Matches {@code JdbcClientPool.Action}. */
-  @FunctionalInterface
-  interface Call<R> {
-    R apply(Connection conn) throws SQLException;
   }
 }

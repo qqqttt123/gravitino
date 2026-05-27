@@ -20,44 +20,25 @@
 package org.apache.gravitino.iceberg.service.purge;
 
 import com.google.common.collect.ImmutableMap;
-import java.sql.Statement;
-import java.util.HashMap;
-import java.util.Map;
-import org.apache.iceberg.jdbc.JdbcClientPool;
-import org.junit.jupiter.api.AfterEach;
+import org.apache.gravitino.storage.RandomIdGenerator;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class TestIcebergPurgeJobStore {
 
-  private JdbcClientPool pool;
   IcebergPurgeJobStore store;
 
-  @BeforeEach
-  void setUp() throws Exception {
-    String url = "jdbc:h2:mem:purge_" + System.nanoTime() + ";DB_CLOSE_DELAY=-1;MODE=MySQL";
-    Map<String, String> props = new HashMap<>();
-    props.put("jdbc.user", "sa");
-    props.put("jdbc.password", "");
-    pool = new JdbcClientPool(url, props);
-    pool.run(
-        conn -> {
-          try (Statement st = conn.createStatement()) {
-            for (String ddl : PurgeTestSchema.H2_CREATE.split(";")) {
-              if (!ddl.trim().isEmpty()) {
-                st.execute(ddl);
-              }
-            }
-          }
-          return null;
-        });
-    store = new IcebergPurgeJobStore(pool);
+  @BeforeAll
+  static void setUpClass() {
+    PurgeTestBackend.init();
   }
 
-  @AfterEach
-  void tearDown() {
-    pool.close();
+  @BeforeEach
+  void setUp() {
+    PurgeTestBackend.clear();
+    store = new IcebergPurgeJobStore(new RandomIdGenerator());
   }
 
   static IcebergPurgeJob sampleJob() {

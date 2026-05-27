@@ -153,7 +153,7 @@ COMMENT ON COLUMN idp_group_user_rel.last_version IS 'idp relation last version'
 COMMENT ON COLUMN idp_group_user_rel.deleted_at IS 'idp relation deleted at';
 
 CREATE TABLE IF NOT EXISTS iceberg_cleanup_job (
-  id                BIGSERIAL     PRIMARY KEY,
+  id                BIGINT        NOT NULL PRIMARY KEY,
   metalake_name     VARCHAR(128)  NOT NULL,
   catalog_name      VARCHAR(128)  NOT NULL,
   namespace         VARCHAR(512)  NOT NULL,

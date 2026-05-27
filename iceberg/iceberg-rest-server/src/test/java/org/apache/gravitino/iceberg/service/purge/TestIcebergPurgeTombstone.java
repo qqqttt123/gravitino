@@ -25,19 +25,17 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.sql.Statement;
 import java.util.HashMap;
-import java.util.Map;
 import org.apache.gravitino.iceberg.common.IcebergConfig;
 import org.apache.gravitino.iceberg.service.CatalogWrapperForREST;
 import org.apache.gravitino.iceberg.service.IcebergCatalogWrapperManager;
 import org.apache.gravitino.iceberg.service.dispatcher.IcebergNamespaceOperationExecutor;
 import org.apache.gravitino.iceberg.service.dispatcher.IcebergTableOperationExecutor;
 import org.apache.gravitino.listener.api.event.IcebergRequestContext;
+import org.apache.gravitino.storage.RandomIdGenerator;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.exceptions.AlreadyExistsException;
-import org.apache.iceberg.jdbc.JdbcClientPool;
 import org.apache.iceberg.rest.requests.CreateTableRequest;
 import org.apache.iceberg.rest.requests.ImmutableRegisterTableRequest;
 import org.apache.iceberg.rest.requests.RegisterTableRequest;
@@ -45,6 +43,7 @@ import org.apache.iceberg.types.Types.NestedField;
 import org.apache.iceberg.types.Types.StringType;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -53,34 +52,21 @@ class TestIcebergPurgeTombstone {
   private static final Schema TABLE_SCHEMA =
       new Schema(NestedField.required(1, "test_field", StringType.get()));
 
-  private JdbcClientPool pool;
   private IcebergPurgeJobStore store;
-  private IcebergPurgeService purgeService;
+  private IcebergPurgeManager purgeManager;
   private CatalogWrapperForREST wrapper;
   private IcebergRequestContext context;
 
-  @BeforeEach
-  void setUp() throws Exception {
-    String url =
-        "jdbc:h2:mem:purge_tombstone_" + System.nanoTime() + ";DB_CLOSE_DELAY=-1;MODE=MySQL";
-    Map<String, String> props = new HashMap<>();
-    props.put("jdbc.user", "sa");
-    props.put("jdbc.password", "");
-    pool = new JdbcClientPool(url, props);
-    pool.run(
-        conn -> {
-          try (Statement st = conn.createStatement()) {
-            for (String ddl : PurgeTestSchema.H2_CREATE.split(";")) {
-              if (!ddl.trim().isEmpty()) {
-                st.execute(ddl);
-              }
-            }
-          }
-          return null;
-        });
+  @BeforeAll
+  static void setUpClass() {
+    PurgeTestBackend.init();
+  }
 
-    store = new IcebergPurgeJobStore(pool);
-    purgeService = new IcebergPurgeService(store, new IcebergConfig(new HashMap<>()));
+  @BeforeEach
+  void setUp() {
+    PurgeTestBackend.clear();
+    store = new IcebergPurgeJobStore(new RandomIdGenerator());
+    purgeManager = new IcebergPurgeManager(store, new IcebergConfig(new HashMap<>()));
     wrapper = mock(CatalogWrapperForREST.class);
     context = mock(IcebergRequestContext.class);
     when(context.catalogName()).thenReturn("cat");
@@ -90,11 +76,8 @@ class TestIcebergPurgeTombstone {
 
   @AfterEach
   void tearDown() {
-    if (purgeService != null) {
-      purgeService.close();
-    }
-    if (pool != null) {
-      pool.close();
+    if (purgeManager != null) {
+      purgeManager.close();
     }
   }
 
@@ -131,11 +114,11 @@ class TestIcebergPurgeTombstone {
   }
 
   private IcebergTableOperationExecutor newTableExecutor() {
-    return new IcebergTableOperationExecutor(wrapperManager(), purgeService);
+    return new IcebergTableOperationExecutor(wrapperManager(), purgeManager);
   }
 
   private IcebergNamespaceOperationExecutor newNamespaceExecutor() {
-    return new IcebergNamespaceOperationExecutor(wrapperManager(), purgeService);
+    return new IcebergNamespaceOperationExecutor(wrapperManager(), purgeManager);
   }
 
   private IcebergCatalogWrapperManager wrapperManager() {

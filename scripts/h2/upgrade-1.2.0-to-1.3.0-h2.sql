@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS `idp_group_user_rel` (
 ) ENGINE=InnoDB;
 
 CREATE TABLE IF NOT EXISTS `iceberg_cleanup_job` (
-  `id`                BIGINT        AUTO_INCREMENT,
+  `id`                BIGINT        NOT NULL,
   `metalake_name`     VARCHAR(128)  NOT NULL,
   `catalog_name`      VARCHAR(128)  NOT NULL,
   `namespace`         VARCHAR(512)  NOT NULL,

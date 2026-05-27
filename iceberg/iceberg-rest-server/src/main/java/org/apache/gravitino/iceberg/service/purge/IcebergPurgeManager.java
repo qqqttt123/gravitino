@@ -55,9 +55,9 @@ import org.slf4j.LoggerFactory;
  * Server-wide async purge engine: claims {@code iceberg_cleanup_job} rows, deletes the dropped
  * table's files in bulk, and renews claim heartbeats on a thread decoupled from deletion.
  */
-public class IcebergPurgeService implements AutoCloseable {
+public class IcebergPurgeManager implements AutoCloseable {
 
-  private static final Logger LOG = LoggerFactory.getLogger(IcebergPurgeService.class);
+  private static final Logger LOG = LoggerFactory.getLogger(IcebergPurgeManager.class);
 
   private final IcebergPurgeJobStore store;
   private final int workerThreads;
@@ -75,12 +75,12 @@ public class IcebergPurgeService implements AutoCloseable {
   private ScheduledExecutorService scheduler;
 
   /**
-   * Creates an async purge service.
+   * Creates an async purge manager.
    *
-   * @param store the JDBC job store
+   * @param store the purge job store backed by the entity store's relational backend
    * @param config Iceberg REST server config
    */
-  public IcebergPurgeService(IcebergPurgeJobStore store, IcebergConfig config) {
+  public IcebergPurgeManager(IcebergPurgeJobStore store, IcebergConfig config) {
     this.store = store;
     this.workerThreads = config.get(IcebergConfig.ASYNC_PURGE_WORKER_THREADS);
     int deleteThreads = config.get(IcebergConfig.ASYNC_PURGE_DELETE_THREADS);
@@ -157,7 +157,8 @@ public class IcebergPurgeService implements AutoCloseable {
       }
     }
     deleteExecutor.shutdownNow();
-    store.close();
+    // The job store is backed by the entity store's shared relational backend, which owns the
+    // connection pool lifecycle, so there is nothing to close here.
   }
 
   void purgeFiles(FileIO io, String metadataLocation) {
@@ -188,15 +189,22 @@ public class IcebergPurgeService implements AutoCloseable {
 
   private void workerLoop() {
     while (running) {
-      long now = System.currentTimeMillis();
-      IcebergPurgeJob job = store.claimNext(now, heartbeatTimeoutMs, candidateWindow);
-      if (job == null) {
-        sleep(pollIntervalMs);
-        continue;
-      }
+      try {
+        long now = System.currentTimeMillis();
+        IcebergPurgeJob job = store.claimNext(now, heartbeatTimeoutMs, candidateWindow);
+        if (job == null) {
+          sleep(pollIntervalMs);
+          continue;
+        }
 
-      ownedHeartbeats.put(job.id(), now);
-      runJob(job);
+        ownedHeartbeats.put(job.id(), now);
+        runJob(job);
+      } catch (RuntimeException e) {
+        // claimNext (and any unexpected error) must never terminate the worker: a transient backend
+        // failure would otherwise permanently remove this thread from the pool. Log and back off.
+        LOG.warn("Purge worker loop hit an unexpected error; backing off", e);
+        sleep(pollIntervalMs);
+      }
     }
   }
 
@@ -205,9 +213,13 @@ public class IcebergPurgeService implements AutoCloseable {
       FileIO io = CatalogUtil.loadFileIO(job.fileIoImpl(), job.fileIoProperties(), null);
       purgeFiles(io, job.metadataLocation());
       store.markSucceeded(job.id());
-    } catch (NotFoundException terminal) {
-      LOG.warn("Purge job {} hit terminal metadata failure", job.id(), terminal);
-      store.markFailed(job.id(), terminal.getMessage());
+    } catch (NotFoundException alreadyGone) {
+      // The metadata file is missing, so the table's files are already gone (a prior attempt
+      // finished deleting them before the row was marked, or the table was never fully written).
+      // There is nothing left to purge, so treat it as success rather than a failure.
+      LOG.info(
+          "Purge job {} metadata already absent; treating as completed", job.id(), alreadyGone);
+      store.markSucceeded(job.id());
     } catch (RuntimeException e) {
       LOG.warn("Purge job {} failed transiently; will retry", job.id(), e);
       store.recordFailure(job.id(), e.getMessage(), maxAttempts);

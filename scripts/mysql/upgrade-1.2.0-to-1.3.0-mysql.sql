@@ -120,7 +120,7 @@ CREATE TABLE IF NOT EXISTS `idp_group_user_rel` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin COMMENT 'local IdP group user relation';
 
 CREATE TABLE IF NOT EXISTS `iceberg_cleanup_job` (
-  `id`                BIGINT(20)    UNSIGNED NOT NULL AUTO_INCREMENT,
+  `id`                BIGINT(20)    UNSIGNED NOT NULL,
   `metalake_name`     VARCHAR(128)  NOT NULL,
   `catalog_name`      VARCHAR(128)  NOT NULL,
   `namespace`         VARCHAR(512)  NOT NULL,

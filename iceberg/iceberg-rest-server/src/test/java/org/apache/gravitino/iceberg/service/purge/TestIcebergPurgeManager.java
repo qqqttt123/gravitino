@@ -20,54 +20,52 @@
 package org.apache.gravitino.iceberg.service.purge;
 
 import com.google.common.collect.ImmutableMap;
-import java.sql.Statement;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.gravitino.iceberg.common.IcebergConfig;
+import org.apache.gravitino.storage.RandomIdGenerator;
+import org.apache.iceberg.BaseTable;
+import org.apache.iceberg.DataFile;
+import org.apache.iceberg.DataFiles;
+import org.apache.iceberg.ManifestFile;
+import org.apache.iceberg.PartitionSpec;
+import org.apache.iceberg.Schema;
+import org.apache.iceberg.Snapshot;
+import org.apache.iceberg.Table;
+import org.apache.iceberg.catalog.Namespace;
+import org.apache.iceberg.catalog.TableIdentifier;
+import org.apache.iceberg.inmemory.InMemoryCatalog;
+import org.apache.iceberg.inmemory.InMemoryFileIO;
 import org.apache.iceberg.io.FileIO;
 import org.apache.iceberg.io.InputFile;
 import org.apache.iceberg.io.OutputFile;
 import org.apache.iceberg.io.SupportsBulkOperations;
-import org.apache.iceberg.jdbc.JdbcClientPool;
+import org.apache.iceberg.types.Types;
 import org.awaitility.Awaitility;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-class TestIcebergPurgeService {
+class TestIcebergPurgeManager {
 
-  private JdbcClientPool pool;
   private IcebergPurgeJobStore store;
 
-  @BeforeEach
-  void setUp() throws Exception {
-    String url = "jdbc:h2:mem:svc_" + System.nanoTime() + ";DB_CLOSE_DELAY=-1;MODE=MySQL";
-    Map<String, String> props = new HashMap<>();
-    props.put("jdbc.user", "sa");
-    props.put("jdbc.password", "");
-    pool = new JdbcClientPool(url, props);
-    pool.run(
-        conn -> {
-          try (Statement st = conn.createStatement()) {
-            for (String ddl : PurgeTestSchema.H2_CREATE.split(";")) {
-              if (!ddl.trim().isEmpty()) {
-                st.execute(ddl);
-              }
-            }
-          }
-          return null;
-        });
-    store = new IcebergPurgeJobStore(pool);
+  @BeforeAll
+  static void setUpClass() {
+    PurgeTestBackend.init();
   }
 
-  @AfterEach
-  void tearDown() {
-    pool.close();
+  @BeforeEach
+  void setUp() {
+    PurgeTestBackend.clear();
+    store = new IcebergPurgeJobStore(new RandomIdGenerator());
   }
 
   private static IcebergConfig fastPollConfig() {
@@ -93,7 +91,7 @@ class TestIcebergPurgeService {
   @Test
   void testDeleteAllBatchesEveryFile() {
     CopyOnWriteArrayList<String> deleted = new CopyOnWriteArrayList<>();
-    IcebergPurgeService svc = new IcebergPurgeService(store, new IcebergConfig(new HashMap<>()));
+    IcebergPurgeManager svc = new IcebergPurgeManager(store, new IcebergConfig(new HashMap<>()));
     try {
       svc.deleteAll(new RecordingFileIO(deleted), Arrays.asList("a", "b", "c", "d", "e", "f", "g"));
       Assertions.assertEquals(7, deleted.size());
@@ -103,10 +101,58 @@ class TestIcebergPurgeService {
   }
 
   @Test
+  void testPurgeFilesDeletesAllReachableFiles() throws Exception {
+    InMemoryCatalog catalog = new InMemoryCatalog();
+    catalog.initialize("test", ImmutableMap.of());
+    Namespace namespace = Namespace.of("db");
+    catalog.createNamespace(namespace);
+    TableIdentifier identifier = TableIdentifier.of(namespace, "t");
+    Schema schema = new Schema(Types.NestedField.required(1, "id", Types.IntegerType.get()));
+    Table table = catalog.createTable(identifier, schema);
+
+    // Append a data file so the snapshot has a manifest list, a manifest, and a data file path.
+    DataFile dataFile =
+        DataFiles.builder(PartitionSpec.unpartitioned())
+            .withPath("memory://db/t/data/00000-0.parquet")
+            .withFileSizeInBytes(10L)
+            .withRecordCount(1L)
+            .build();
+    table.newAppend().appendFile(dataFile).commit();
+
+    BaseTable base = (BaseTable) catalog.loadTable(identifier);
+    FileIO io = base.io();
+    String metadataLocation = base.operations().current().metadataFileLocation();
+    // Materialize the data file so its deletion is observable in the in-memory FileIO.
+    ((InMemoryFileIO) io).addFile(dataFile.location(), new byte[] {1});
+
+    // Capture every reachable file before purge; the manifest list/manifests cannot be read back
+    // afterwards because they will have been deleted.
+    List<String> expected = new ArrayList<>();
+    expected.add(metadataLocation);
+    expected.add(dataFile.location());
+    for (Snapshot snapshot : base.snapshots()) {
+      expected.add(snapshot.manifestListLocation());
+      for (ManifestFile manifest : snapshot.allManifests(io)) {
+        expected.add(manifest.path());
+      }
+    }
+    expected.forEach(file -> Assertions.assertTrue(((InMemoryFileIO) io).fileExists(file), file));
+
+    IcebergPurgeManager svc = new IcebergPurgeManager(store, new IcebergConfig(new HashMap<>()));
+    try {
+      svc.purgeFiles(io, metadataLocation);
+    } finally {
+      svc.close();
+    }
+
+    expected.forEach(file -> Assertions.assertFalse(((InMemoryFileIO) io).fileExists(file), file));
+  }
+
+  @Test
   void testWorkerRunsJobToSucceeded() {
     AtomicInteger calls = new AtomicInteger();
-    IcebergPurgeService svc =
-        new IcebergPurgeService(store, fastPollConfig()) {
+    IcebergPurgeManager svc =
+        new IcebergPurgeManager(store, fastPollConfig()) {
           @Override
           void purgeFiles(FileIO io, String metadataLocation) {
             calls.incrementAndGet();
@@ -130,8 +176,8 @@ class TestIcebergPurgeService {
     config.put("async-purge.worker-threads", "1");
     config.put("async-purge.poll-interval-ms", "50");
     config.put("async-purge.max-attempts", "3");
-    IcebergPurgeService svc =
-        new IcebergPurgeService(store, new IcebergConfig(config)) {
+    IcebergPurgeManager svc =
+        new IcebergPurgeManager(store, new IcebergConfig(config)) {
           @Override
           void purgeFiles(FileIO io, String metadataLocation) {
             throw new RuntimeException("transient");
@@ -150,7 +196,7 @@ class TestIcebergPurgeService {
 
   @Test
   void testIsNameOccupiedDelegatesToStore() {
-    IcebergPurgeService svc = new IcebergPurgeService(store, new IcebergConfig(new HashMap<>()));
+    IcebergPurgeManager svc = new IcebergPurgeManager(store, new IcebergConfig(new HashMap<>()));
     try {
       Assertions.assertFalse(svc.isNameOccupied("cat", "db", "t"));
       svc.enqueue(sampleJob());

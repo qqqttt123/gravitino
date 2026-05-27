@@ -75,6 +75,7 @@ public class TestIcebergConfig {
   @Test
   public void testAsyncPurgeDefaults() {
     IcebergConfig config = new IcebergConfig(ImmutableMap.of());
+    Assertions.assertFalse(config.get(IcebergConfig.ASYNC_PURGE_ENABLED));
     Assertions.assertEquals(2, config.get(IcebergConfig.ASYNC_PURGE_WORKER_THREADS));
     Assertions.assertEquals(4, config.get(IcebergConfig.ASYNC_PURGE_DELETE_THREADS));
     Assertions.assertEquals(1000, config.get(IcebergConfig.ASYNC_PURGE_DELETE_BATCH_SIZE));

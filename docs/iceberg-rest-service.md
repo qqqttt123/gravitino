@@ -94,14 +94,17 @@ You can also specify filter parameters by setting configuration entries in the s
 
 When a client drops a table with `purgeRequested=true`, Gravitino keeps the existing synchronous behavior by default. The catalog entry and table files are removed before the `DELETE` request returns.
 
-A client can opt in to asynchronous file cleanup by sending the HTTP header `X-Gravitino-Async-Purge: true` with `DELETE ...?purgeRequested=true`. In this mode, Gravitino removes the catalog entry before returning `204 No Content`, records a durable cleanup job in the Gravitino relational backend, and deletes table files in the background. While an active cleanup job exists for the table identifier, `createTable` and `registerTable` requests for the same catalog, namespace, and table return `409 Conflict`. After cleanup reaches a terminal state, the identifier can be reused.
+Asynchronous purge is disabled by default. When `gravitino.iceberg-rest.async-purge.enabled` is `false`, the purge worker threads and the backend job store are not started, the server requires no relational backend for purge, and any async purge request silently falls back to synchronous purge.
+
+When async purge is enabled, a client can opt in to asynchronous file cleanup per request by sending the HTTP header `X-Gravitino-Async-Purge: true` with `DELETE ...?purgeRequested=true`. In this mode, Gravitino removes the catalog entry before returning `204 No Content`, records a durable cleanup job in the Gravitino relational backend, and deletes table files in the background. While an active cleanup job exists for the table identifier, `createTable` and `registerTable` requests for the same catalog, namespace, and table return `409 Conflict`. After cleanup reaches a terminal state, the identifier can be reused.
 
 Only the literal header value `true`, ignoring case and surrounding whitespace, enables asynchronous purge. If the header is absent, `false`, or any other value, the request uses synchronous purge.
 
-Asynchronous purge uses the same relational backend as Gravitino's entity store. Initialize or upgrade the backend schema before enabling clients to use the async header.
+Asynchronous purge reuses Gravitino's entity store relational backend (its connection pool and per-backend SQL handling) rather than opening its own JDBC connections, so it must run with that backend available. Initialize or upgrade the backend schema (the `iceberg_cleanup_job` table) before enabling the feature.
 
 | Configuration item | Description | Default value | Required | Since Version |
 |--------------------|-------------|---------------|----------|---------------|
+| `gravitino.iceberg-rest.async-purge.enabled` | Whether the asynchronous table purge engine is enabled. When disabled, async purge requests fall back to synchronous purge. | `false` | No | 1.3.0 |
 | `gravitino.iceberg-rest.async-purge.worker-threads` | Worker pool size per server. Each worker claims and runs purge jobs from the shared backend table. | `2` | No | 1.3.0 |
 | `gravitino.iceberg-rest.async-purge.delete-threads` | Server-wide file-delete pool size shared by purge jobs. | `4` | No | 1.3.0 |
 | `gravitino.iceberg-rest.async-purge.delete-batch-size` | Number of files per bulk-delete batch. | `1000` | No | 1.3.0 |
