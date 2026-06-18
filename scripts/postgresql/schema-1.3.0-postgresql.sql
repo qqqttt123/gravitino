@@ -1054,3 +1054,45 @@ COMMENT ON COLUMN entity_change_log.entity_type IS 'METALAKE | CATALOG | SCHEMA 
 COMMENT ON COLUMN entity_change_log.entity_full_name IS 'Dot-separated full name of the affected entity. For ALTER, stores the old name. For DROP, stores the entity name.';
 COMMENT ON COLUMN entity_change_log.operate_type IS 'Operate type code: 1=ALTER, 2=DROP, 3=INSERT. Codes are stable and never re-used.';
 COMMENT ON COLUMN entity_change_log.created_at IS 'timestamp of the change in millis';
+
+CREATE TABLE IF NOT EXISTS iceberg_purge_job (
+    id BIGSERIAL PRIMARY KEY,
+    metalake_name VARCHAR(128) NOT NULL,
+    catalog_name VARCHAR(128) NOT NULL,
+    namespace VARCHAR(512) NOT NULL,
+    object_name VARCHAR(256) NOT NULL,
+    object_type VARCHAR(16) NOT NULL,
+    metadata_location VARCHAR(1024) NOT NULL,
+    file_io_impl VARCHAR(256) NOT NULL,
+    file_io_props TEXT NOT NULL,
+    state VARCHAR(16) NOT NULL,
+    attempts INT NOT NULL DEFAULT 0,
+    max_attempts INT NOT NULL,
+    last_error TEXT,
+    heartbeat_at BIGINT,
+    next_attempt_at BIGINT NOT NULL,
+    created_at BIGINT NOT NULL,
+    created_by VARCHAR(128) NOT NULL,
+    updated_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_state_next_attempt ON iceberg_purge_job(state, next_attempt_at);
+CREATE INDEX IF NOT EXISTS idx_object ON iceberg_purge_job(catalog_name, namespace, object_name, state);
+COMMENT ON TABLE iceberg_purge_job IS 'Async hard-deletion (purge) jobs for the Iceberg REST server';
+COMMENT ON COLUMN iceberg_purge_job.id IS 'auto increment id';
+COMMENT ON COLUMN iceberg_purge_job.metalake_name IS 'metalake name';
+COMMENT ON COLUMN iceberg_purge_job.catalog_name IS 'iceberg catalog name';
+COMMENT ON COLUMN iceberg_purge_job.namespace IS 'table namespace';
+COMMENT ON COLUMN iceberg_purge_job.object_name IS 'table or view name';
+COMMENT ON COLUMN iceberg_purge_job.object_type IS 'TABLE | VIEW';
+COMMENT ON COLUMN iceberg_purge_job.metadata_location IS 'metadata.json location to rebuild the file set';
+COMMENT ON COLUMN iceberg_purge_job.file_io_impl IS 'FileIO implementation class';
+COMMENT ON COLUMN iceberg_purge_job.file_io_props IS 'FileIO properties as JSON';
+COMMENT ON COLUMN iceberg_purge_job.state IS 'PENDING | RUNNING | SUCCEEDED | FAILED | CANCELLED';
+COMMENT ON COLUMN iceberg_purge_job.attempts IS 'number of attempts so far';
+COMMENT ON COLUMN iceberg_purge_job.max_attempts IS 'attempts before the job is marked FAILED';
+COMMENT ON COLUMN iceberg_purge_job.last_error IS 'last error message';
+COMMENT ON COLUMN iceberg_purge_job.heartbeat_at IS 'last heartbeat from the processing worker; NULL when unclaimed';
+COMMENT ON COLUMN iceberg_purge_job.next_attempt_at IS 'earliest time the job may be claimed, in millis';
+COMMENT ON COLUMN iceberg_purge_job.created_at IS 'create time in millis';
+COMMENT ON COLUMN iceberg_purge_job.created_by IS 'user who requested the drop';
+COMMENT ON COLUMN iceberg_purge_job.updated_at IS 'last update time in millis';

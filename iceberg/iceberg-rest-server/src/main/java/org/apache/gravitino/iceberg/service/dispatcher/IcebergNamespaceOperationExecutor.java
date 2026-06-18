@@ -21,11 +21,14 @@ package org.apache.gravitino.iceberg.service.dispatcher;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 import org.apache.gravitino.auth.AuthConstants;
 import org.apache.gravitino.catalog.lakehouse.iceberg.IcebergConstants;
 import org.apache.gravitino.iceberg.service.IcebergCatalogWrapperManager;
+import org.apache.gravitino.iceberg.service.purge.IcebergPurgeJobStore;
 import org.apache.gravitino.listener.api.event.IcebergRequestContext;
 import org.apache.iceberg.catalog.Namespace;
+import org.apache.iceberg.exceptions.AlreadyExistsException;
 import org.apache.iceberg.rest.requests.CreateNamespaceRequest;
 import org.apache.iceberg.rest.requests.RegisterTableRequest;
 import org.apache.iceberg.rest.requests.UpdateNamespacePropertiesRequest;
@@ -42,11 +45,25 @@ public class IcebergNamespaceOperationExecutor implements IcebergNamespaceOperat
   private static final Logger LOG =
       LoggerFactory.getLogger(IcebergNamespaceOperationExecutor.class);
 
-  private IcebergCatalogWrapperManager icebergCatalogWrapperManager;
+  private final IcebergCatalogWrapperManager icebergCatalogWrapperManager;
+  private final Optional<IcebergPurgeJobStore> purgeJobStore;
 
   public IcebergNamespaceOperationExecutor(
       IcebergCatalogWrapperManager icebergCatalogWrapperManager) {
+    this(icebergCatalogWrapperManager, null);
+  }
+
+  /**
+   * Creates an executor that enforces the name-reuse tombstone on register.
+   *
+   * @param icebergCatalogWrapperManager the catalog wrapper manager
+   * @param purgeJobStore the purge job store, or {@code null} when async purge is disabled
+   */
+  public IcebergNamespaceOperationExecutor(
+      IcebergCatalogWrapperManager icebergCatalogWrapperManager,
+      IcebergPurgeJobStore purgeJobStore) {
     this.icebergCatalogWrapperManager = icebergCatalogWrapperManager;
+    this.purgeJobStore = Optional.ofNullable(purgeJobStore);
   }
 
   @Override
@@ -121,6 +138,21 @@ public class IcebergNamespaceOperationExecutor implements IcebergNamespaceOperat
       IcebergRequestContext context,
       Namespace namespace,
       RegisterTableRequest registerTableRequest) {
+    // Name-reuse tombstone (design §5.13): reject registering at an identifier whose files are
+    // still being purged. (Register-as-recovery, §5.7, will cancel the job before registering.)
+    if (purgeJobStore.isPresent()) {
+      Optional<Long> jobId =
+          purgeJobStore
+              .get()
+              .findActiveJobId(
+                  context.catalogName(), namespace.toString(), registerTableRequest.name());
+      if (jobId.isPresent()) {
+        throw new AlreadyExistsException(
+            "Cannot register table %s.%s: it is being purged (cleanup job %d still in progress)",
+            namespace, registerTableRequest.name(), jobId.get());
+      }
+    }
+
     return icebergCatalogWrapperManager
         .getCatalogWrapper(context.catalogName())
         .registerTable(namespace, registerTableRequest, context.requestCredentialVending());

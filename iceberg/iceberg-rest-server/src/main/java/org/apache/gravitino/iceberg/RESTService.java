@@ -47,6 +47,9 @@ import org.apache.gravitino.iceberg.service.dispatcher.IcebergViewOperationExecu
 import org.apache.gravitino.iceberg.service.metrics.IcebergMetricsManager;
 import org.apache.gravitino.iceberg.service.provider.IcebergConfigProvider;
 import org.apache.gravitino.iceberg.service.provider.IcebergConfigProviderFactory;
+import org.apache.gravitino.iceberg.service.purge.IcebergPurgeJobStore;
+import org.apache.gravitino.iceberg.service.purge.IcebergPurgeJobStoreFactory;
+import org.apache.gravitino.iceberg.service.purge.IcebergPurgeWorker;
 import org.apache.gravitino.listener.EventBus;
 import org.apache.gravitino.metrics.MetricsSystem;
 import org.apache.gravitino.metrics.source.MetricsSource;
@@ -77,6 +80,7 @@ public class RESTService implements GravitinoAuxiliaryService {
   private IcebergCatalogWrapperManager icebergCatalogWrapperManager;
   private IcebergMetricsManager icebergMetricsManager;
   private IcebergConfigProvider configProvider;
+  private IcebergPurgeWorker icebergPurgeWorker;
   private boolean auxMode;
 
   private void initServer(IcebergConfig icebergConfig) {
@@ -119,9 +123,22 @@ public class RESTService implements GravitinoAuxiliaryService {
             skipAuthorizationForRestBackend,
             icebergCatalogWrapperManager);
     this.icebergMetricsManager = new IcebergMetricsManager(icebergConfig);
+
+    // Async hard deletion: reuse the entity store's relational DataSource so a
+    // DELETE ...?purgeRequested=true enqueues a job that a background worker drains.
+    IcebergPurgeJobStore purgeJobStore = null;
+    if (IcebergPurgeJobStoreFactory.isEnabled()) {
+      purgeJobStore = new IcebergPurgeJobStore(IcebergPurgeJobStoreFactory.sharedDataSource());
+      this.icebergPurgeWorker = new IcebergPurgeWorker(purgeJobStore, icebergConfig);
+      LOG.info("Async Iceberg purge enabled");
+    }
+
     // Table: HookDispatcher -> EventDispatcher -> OperationExecutor
     IcebergTableOperationDispatcher icebergTableOperationDispatcher =
-        new IcebergTableOperationExecutor(icebergCatalogWrapperManager);
+        new IcebergTableOperationExecutor(
+            icebergCatalogWrapperManager,
+            purgeJobStore,
+            icebergConfig.get(IcebergConfig.ASYNC_PURGE_MAX_ATTEMPTS));
     IcebergTableOperationDispatcher icebergTableEventDispatcher =
         new IcebergTableEventDispatcher(icebergTableOperationDispatcher, eventBus, metalakeName);
     if (authorizationContext.isAuthorizationEnabled()) {
@@ -142,7 +159,7 @@ public class RESTService implements GravitinoAuxiliaryService {
 
     // Namespace: HookDispatcher -> EventDispatcher -> OperationExecutor
     IcebergNamespaceOperationDispatcher namespaceOperationDispatcher =
-        new IcebergNamespaceOperationExecutor(icebergCatalogWrapperManager);
+        new IcebergNamespaceOperationExecutor(icebergCatalogWrapperManager, purgeJobStore);
     IcebergNamespaceOperationDispatcher icebergNamespaceEventDispatcher =
         new IcebergNamespaceEventDispatcher(namespaceOperationDispatcher, eventBus, metalakeName);
     if (authorizationContext.isAuthorizationEnabled()) {
@@ -198,6 +215,9 @@ public class RESTService implements GravitinoAuxiliaryService {
   @Override
   public void serviceStart() {
     icebergMetricsManager.start();
+    if (icebergPurgeWorker != null) {
+      icebergPurgeWorker.start();
+    }
     if (server != null) {
       try {
         server.start();
@@ -223,6 +243,10 @@ public class RESTService implements GravitinoAuxiliaryService {
     if (icebergMetricsManager != null) {
       icebergMetricsManager.close();
     }
+    if (icebergPurgeWorker != null) {
+      icebergPurgeWorker.close();
+    }
+    // The purge job store's DataSource is owned by the entity store, so it is not closed here.
   }
 
   public void join() {
