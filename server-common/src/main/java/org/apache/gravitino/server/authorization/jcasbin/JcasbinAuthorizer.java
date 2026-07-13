@@ -24,7 +24,6 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.Principal;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -470,15 +469,21 @@ public class JcasbinAuthorizer implements GravitinoAuthorizer {
   public boolean hasSetOwnerPermission(
       String metalake, String type, String fullName, AuthorizationRequestContext requestContext) {
     Principal currentPrincipal = PrincipalUtils.getCurrentPrincipal();
+    MetadataObject.Type metadataType = MetadataObject.Type.valueOf(type.toUpperCase(Locale.ROOT));
+    MetadataObject targetObject = MetadataObjects.parse(fullName, metadataType);
     MetadataObject metalakeObject =
         MetadataObjects.of(ImmutableList.of(metalake), MetadataObject.Type.METALAKE);
+
+    if (hasSetOwnerDeny(currentPrincipal, metalake, targetObject, metalakeObject, requestContext)) {
+      return false;
+    }
+
     // metalake owner can set owner in metalake.
     if (isOwner(currentPrincipal, metalake, metalakeObject, requestContext)) {
       return true;
     }
-    MetadataObject.Type metadataType = MetadataObject.Type.valueOf(type.toUpperCase(Locale.ROOT));
-    MetadataObject metadataObject =
-        MetadataObjects.of(Arrays.asList(fullName.split("\\.")), metadataType);
+
+    MetadataObject metadataObject = targetObject;
     do {
       if (isOwner(currentPrincipal, metalake, metadataObject, requestContext)) {
         MetadataObject.Type tempType = metadataObject.type();
@@ -534,6 +539,69 @@ public class JcasbinAuthorizer implements GravitinoAuthorizer {
     return false;
   }
 
+  private boolean hasSetOwnerDeny(
+      Principal principal,
+      String metalake,
+      MetadataObject targetObject,
+      MetadataObject metalakeObject,
+      AuthorizationRequestContext requestContext) {
+    MetadataObject.Type targetType = targetObject.type();
+    if (targetType == MetadataObject.Type.CATALOG) {
+      return hasDenyOnAny(
+          principal,
+          metalake,
+          ImmutableList.of(targetObject, metalakeObject),
+          Privilege.Name.USE_CATALOG,
+          requestContext);
+    }
+
+    if (targetType == MetadataObject.Type.SCHEMA) {
+      return hasDenyOnAny(
+          principal,
+          metalake,
+          ImmutableList.of(MetadataObjects.parent(targetObject), metalakeObject),
+          Privilege.Name.USE_CATALOG,
+          requestContext);
+    }
+
+    if (targetType == MetadataObject.Type.TABLE
+        || targetType == MetadataObject.Type.VIEW
+        || targetType == MetadataObject.Type.TOPIC
+        || targetType == MetadataObject.Type.FILESET
+        || targetType == MetadataObject.Type.MODEL) {
+      MetadataObject schemaObject = MetadataObjects.parent(targetObject);
+      MetadataObject catalogObject = MetadataObjects.parent(schemaObject);
+      return hasDenyOnAny(
+              principal,
+              metalake,
+              ImmutableList.of(catalogObject, metalakeObject),
+              Privilege.Name.USE_CATALOG,
+              requestContext)
+          || hasDenyOnAny(
+              principal,
+              metalake,
+              ImmutableList.of(schemaObject, catalogObject, metalakeObject),
+              Privilege.Name.USE_SCHEMA,
+              requestContext);
+    }
+
+    return false;
+  }
+
+  private boolean hasDenyOnAny(
+      Principal principal,
+      String metalake,
+      List<MetadataObject> metadataObjects,
+      Privilege.Name privilege,
+      AuthorizationRequestContext requestContext) {
+    for (MetadataObject metadataObject : metadataObjects) {
+      if (deny(principal, metalake, metadataObject, privilege, requestContext)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   @Override
   public boolean hasMetadataPrivilegePermission(
       String metalake, String type, String fullName, AuthorizationRequestContext requestContext) {
@@ -551,6 +619,11 @@ public class JcasbinAuthorizer implements GravitinoAuthorizer {
       chain.add(obj);
     }
     chain.add(MetadataObjects.of(ImmutableList.of(metalake), MetadataObject.Type.METALAKE));
+
+    if (hasDenyOnAny(
+        currentPrincipal, metalake, chain, Privilege.Name.MANAGE_GRANTS, requestContext)) {
+      return false;
+    }
 
     for (MetadataObject obj : chain) {
       if (authorize(
