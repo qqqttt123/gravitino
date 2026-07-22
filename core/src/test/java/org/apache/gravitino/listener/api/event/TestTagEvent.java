@@ -20,6 +20,7 @@
 package org.apache.gravitino.listener.api.event;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -27,6 +28,7 @@ import com.google.common.collect.ImmutableMap;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import org.apache.gravitino.Entity;
 import org.apache.gravitino.MetadataObject;
 import org.apache.gravitino.NameIdentifier;
@@ -38,6 +40,7 @@ import org.apache.gravitino.listener.api.info.TagInfo;
 import org.apache.gravitino.tag.Tag;
 import org.apache.gravitino.tag.TagChange;
 import org.apache.gravitino.tag.TagDispatcher;
+import org.apache.gravitino.tag.TagValueConstraint;
 import org.apache.gravitino.utils.MetadataObjectUtil;
 import org.apache.gravitino.utils.NameIdentifierUtil;
 import org.junit.jupiter.api.Assertions;
@@ -509,9 +512,9 @@ public class TestTagEvent {
     Assertions.assertEquals(
         MetadataObject.Type.CATALOG,
         ((AssociateTagsForMetadataObjectFailureEvent) event).objectType());
-    Assertions.assertEquals(
+    Assertions.assertArrayEquals(
         tagsToAssociate, ((AssociateTagsForMetadataObjectFailureEvent) event).tagsToAdd());
-    Assertions.assertEquals(
+    Assertions.assertArrayEquals(
         tagsToDisassociate, ((AssociateTagsForMetadataObjectFailureEvent) event).tagsToRemove());
     Assertions.assertEquals(
         OperationType.ASSOCIATE_TAGS_FOR_METADATA_OBJECT, event.operationType());
@@ -555,6 +558,8 @@ public class TestTagEvent {
     when(tag.name()).thenReturn("tag");
     when(tag.comment()).thenReturn("comment");
     when(tag.properties()).thenReturn(ImmutableMap.of("color", "#FFFFFF"));
+    when(tag.valueConstraint()).thenReturn(TagValueConstraint.anyValue());
+    when(tag.assignment()).thenReturn(Optional.empty());
     return tag;
   }
 
@@ -570,6 +575,13 @@ public class TestTagEvent {
     Assertions.assertEquals(expectedTag.name(), actualTagInfo.name());
     Assertions.assertEquals(expectedTag.comment(), actualTagInfo.comment());
     Assertions.assertEquals(expectedTag.properties(), actualTagInfo.properties());
+    Assertions.assertEquals(
+        expectedTag.valueConstraint().type(), actualTagInfo.valueConstraint().type());
+    Assertions.assertArrayEquals(
+        expectedTag.valueConstraint().allowedValues(),
+        actualTagInfo.valueConstraint().allowedValues());
+    Assertions.assertEquals(
+        expectedTag.assignment().isPresent(), actualTagInfo.assignment().isPresent());
   }
 
   private TagDispatcher mockTagDispatcher() {
@@ -579,7 +591,11 @@ public class TestTagEvent {
     Tag[] tags = new Tag[] {tag, tag};
 
     when(dispatcher.createTag(
-            any(String.class), any(String.class), any(String.class), any(Map.class)))
+            any(String.class),
+            any(String.class),
+            any(String.class),
+            any(Map.class),
+            nullable(TagValueConstraint.class)))
         .thenReturn(tag);
     when(dispatcher.listTags(metalake)).thenReturn(tagNames);
     when(dispatcher.listTagsInfo(metalake)).thenReturn(tags);

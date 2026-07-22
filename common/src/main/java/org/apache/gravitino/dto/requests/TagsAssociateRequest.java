@@ -18,40 +18,74 @@
  */
 package org.apache.gravitino.dto.requests;
 
+import com.fasterxml.jackson.annotation.JsonAutoDetect;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.base.Preconditions;
+import java.util.Arrays;
+import javax.annotation.Nullable;
 import lombok.EqualsAndHashCode;
-import lombok.Getter;
 import lombok.ToString;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.gravitino.rest.RESTRequest;
+import org.apache.gravitino.tag.TagValue;
 
 /** Represents a request to associate tags. */
-@Getter
-@EqualsAndHashCode
-@ToString
+@JsonAutoDetect(
+    getterVisibility = JsonAutoDetect.Visibility.NONE,
+    isGetterVisibility = JsonAutoDetect.Visibility.NONE)
 public class TagsAssociateRequest implements RESTRequest {
 
+  private static final int MAX_TAG_VALUE_LENGTH = 256;
+
   @JsonProperty("tagsToAdd")
-  private final String[] tagsToAdd;
+  private final RequestTagValue[] tagsToAdd;
 
   @JsonProperty("tagsToRemove")
-  private final String[] tagsToRemove;
+  private final RequestTagValue[] tagsToRemove;
 
   /**
    * Creates a new TagsAssociateRequest.
+   *
+   * @param tagsToAdd The tag values to add.
+   * @param tagsToRemove The tag values to remove.
+   */
+  public TagsAssociateRequest(TagValue[] tagsToAdd, TagValue[] tagsToRemove) {
+    this.tagsToAdd = toRequestTagValues(tagsToAdd);
+    this.tagsToRemove = toRequestTagValues(tagsToRemove);
+  }
+
+  /**
+   * Creates a new TagsAssociateRequest with tag names with no value.
    *
    * @param tagsToAdd The tags to add.
    * @param tagsToRemove The tags to remove.
    */
   public TagsAssociateRequest(String[] tagsToAdd, String[] tagsToRemove) {
-    this.tagsToAdd = tagsToAdd;
-    this.tagsToRemove = tagsToRemove;
+    this(toValuelessTagValues(tagsToAdd), toValuelessTagValues(tagsToRemove));
   }
 
   /** This is the constructor that is used by Jackson deserializer */
   public TagsAssociateRequest() {
-    this(null, null);
+    this.tagsToAdd = null;
+    this.tagsToRemove = null;
+  }
+
+  /**
+   * Returns the tag values to add.
+   *
+   * @return The tag values to add.
+   */
+  public TagValue[] getTagsToAdd() {
+    return toTagValues(tagsToAdd);
+  }
+
+  /**
+   * Returns the tag values to remove.
+   *
+   * @return The tag values to remove.
+   */
+  public TagValue[] getTagsToRemove() {
+    return toTagValues(tagsToRemove);
   }
 
   /**
@@ -65,18 +99,118 @@ public class TagsAssociateRequest implements RESTRequest {
         tagsToAdd != null || tagsToRemove != null,
         "tagsToAdd and tagsToRemove cannot both be null");
 
-    if (tagsToAdd != null) {
-      for (String tag : tagsToAdd) {
-        Preconditions.checkArgument(
-            StringUtils.isNotBlank(tag), "tagsToAdd must not contain null or empty tag names");
-      }
+    validateTagValues(tagsToAdd, "tagsToAdd");
+    validateTagValues(tagsToRemove, "tagsToRemove");
+  }
+
+  private static RequestTagValue[] toRequestTagValues(TagValue[] tagValues) {
+    if (tagValues == null) {
+      return null;
+    }
+    return Arrays.stream(tagValues).map(RequestTagValue::new).toArray(RequestTagValue[]::new);
+  }
+
+  private static TagValue[] toTagValues(RequestTagValue[] tagValues) {
+    if (tagValues == null) {
+      return null;
+    }
+    return Arrays.stream(tagValues).map(RequestTagValue::toTagValue).toArray(TagValue[]::new);
+  }
+
+  private static TagValue[] toValuelessTagValues(String[] tags) {
+    if (tags == null) {
+      return null;
+    }
+    return Arrays.stream(tags).map(TagValue::noValue).toArray(TagValue[]::new);
+  }
+
+  private static void validateTagValues(RequestTagValue[] tagValues, String fieldName) {
+    if (tagValues == null) {
+      return;
     }
 
-    if (tagsToRemove != null) {
-      for (String tag : tagsToRemove) {
+    for (RequestTagValue tagValue : tagValues) {
+      Preconditions.checkArgument(
+          tagValue != null, "%s must not contain null tag values", fieldName);
+      Preconditions.checkArgument(
+          StringUtils.isNotBlank(tagValue.name),
+          "%s must not contain null or empty tag names",
+          fieldName);
+      if (tagValue.value != null) {
         Preconditions.checkArgument(
-            StringUtils.isNotBlank(tag), "tagsToRemove must not contain null or empty tag names");
+            StringUtils.isNotBlank(tagValue.value),
+            "%s must not contain null or empty tag values",
+            fieldName);
+        Preconditions.checkArgument(
+            tagValue.value.length() <= MAX_TAG_VALUE_LENGTH,
+            "%s tag values must not exceed %s characters",
+            fieldName,
+            MAX_TAG_VALUE_LENGTH);
       }
+    }
+  }
+  /**
+   * Compares this request with another object.
+   *
+   * @param o The object to compare.
+   * @return True if the object is equal to this request.
+   */
+  @Override
+  public boolean equals(Object o) {
+    if (this == o) {
+      return true;
+    }
+    if (!(o instanceof TagsAssociateRequest)) {
+      return false;
+    }
+
+    TagsAssociateRequest that = (TagsAssociateRequest) o;
+    return Arrays.equals(tagsToAdd, that.tagsToAdd)
+        && Arrays.equals(tagsToRemove, that.tagsToRemove);
+  }
+
+  /**
+   * @return The hash code of this request.
+   */
+  @Override
+  public int hashCode() {
+    int result = Arrays.hashCode(tagsToAdd);
+    result = 31 * result + Arrays.hashCode(tagsToRemove);
+    return result;
+  }
+
+  /**
+   * @return The string representation of this request.
+   */
+  @Override
+  public String toString() {
+    return "TagsAssociateRequest{"
+        + "tagsToAdd="
+        + Arrays.toString(tagsToAdd)
+        + ", tagsToRemove="
+        + Arrays.toString(tagsToRemove)
+        + "}";
+  }
+
+  @EqualsAndHashCode
+  @ToString
+  static class RequestTagValue {
+    @JsonProperty("name")
+    private String name;
+
+    @JsonProperty("value")
+    @Nullable
+    private String value;
+
+    private RequestTagValue() {}
+
+    private RequestTagValue(TagValue tagValue) {
+      this.name = tagValue.name();
+      this.value = tagValue.value().orElse(null);
+    }
+
+    private TagValue toTagValue() {
+      return value == null ? TagValue.noValue(name) : TagValue.of(name, value);
     }
   }
 }

@@ -52,6 +52,7 @@ import org.apache.gravitino.rest.RESTUtils;
 import org.apache.gravitino.tag.Tag;
 import org.apache.gravitino.tag.TagDispatcher;
 import org.apache.gravitino.tag.TagManager;
+import org.apache.gravitino.tag.TagValue;
 import org.glassfish.jersey.internal.inject.AbstractBinder;
 import org.glassfish.jersey.server.ResourceConfig;
 import org.glassfish.jersey.test.TestProperties;
@@ -915,9 +916,14 @@ public class TestMetadataObjectTagOperations extends BaseOperationsTest {
   public void testAssociateTagsForObject() {
     String[] tagsToAdd = new String[] {"tag1", "tag2"};
     String[] tagsToRemove = new String[] {"tag3", "tag4"};
+    TagValue[] tagValuesToAdd =
+        Arrays.stream(tagsToAdd).map(TagValue::noValue).toArray(TagValue[]::new);
+    TagValue[] tagValuesToRemove =
+        Arrays.stream(tagsToRemove).map(TagValue::noValue).toArray(TagValue[]::new);
 
     MetadataObject catalog = MetadataObjects.parse("object1", MetadataObject.Type.CATALOG);
-    when(tagManager.associateTagsForMetadataObject(metalake, catalog, tagsToAdd, tagsToRemove))
+    when(tagManager.associateTagsForMetadataObject(
+            metalake, catalog, tagValuesToAdd, tagValuesToRemove))
         .thenReturn(tagsToAdd);
 
     TagsAssociateRequest request = new TagsAssociateRequest(tagsToAdd, tagsToRemove);
@@ -939,7 +945,8 @@ public class TestMetadataObjectTagOperations extends BaseOperationsTest {
     Assertions.assertArrayEquals(tagsToAdd, nameListResponse.getNames());
 
     // Test throw null tags
-    when(tagManager.associateTagsForMetadataObject(metalake, catalog, tagsToAdd, tagsToRemove))
+    when(tagManager.associateTagsForMetadataObject(
+            metalake, catalog, tagValuesToAdd, tagValuesToRemove))
         .thenReturn(null);
     Response response1 =
         target(basePath(metalake))
@@ -960,7 +967,7 @@ public class TestMetadataObjectTagOperations extends BaseOperationsTest {
     // Test throw TagAlreadyAssociatedException
     doThrow(new TagAlreadyAssociatedException("mock error"))
         .when(tagManager)
-        .associateTagsForMetadataObject(metalake, catalog, tagsToAdd, tagsToRemove);
+        .associateTagsForMetadataObject(metalake, catalog, tagValuesToAdd, tagValuesToRemove);
     Response response2 =
         target(basePath(metalake))
             .path(catalog.type().toString())
@@ -979,7 +986,8 @@ public class TestMetadataObjectTagOperations extends BaseOperationsTest {
 
     // Test associate tags for view
     MetadataObject view = MetadataObjects.parse("object1.object2.view1", MetadataObject.Type.VIEW);
-    when(tagManager.associateTagsForMetadataObject(metalake, view, tagsToAdd, tagsToRemove))
+    when(tagManager.associateTagsForMetadataObject(
+            metalake, view, tagValuesToAdd, tagValuesToRemove))
         .thenReturn(tagsToAdd);
 
     Response response3 =
@@ -998,7 +1006,8 @@ public class TestMetadataObjectTagOperations extends BaseOperationsTest {
     // Test associate tags for function
     MetadataObject function =
         MetadataObjects.parse("object1.object2.function1", MetadataObject.Type.FUNCTION);
-    when(tagManager.associateTagsForMetadataObject(metalake, function, tagsToAdd, tagsToRemove))
+    when(tagManager.associateTagsForMetadataObject(
+            metalake, function, tagValuesToAdd, tagValuesToRemove))
         .thenReturn(tagsToAdd);
 
     Response response4 =
@@ -1017,7 +1026,11 @@ public class TestMetadataObjectTagOperations extends BaseOperationsTest {
     // Test throw RuntimeException
     doThrow(new RuntimeException("mock error"))
         .when(tagManager)
-        .associateTagsForMetadataObject(any(), any(), any(), any());
+        .associateTagsForMetadataObject(
+            any(String.class),
+            any(MetadataObject.class),
+            any(TagValue[].class),
+            any(TagValue[].class));
 
     Response response5 =
         target(basePath(metalake))
