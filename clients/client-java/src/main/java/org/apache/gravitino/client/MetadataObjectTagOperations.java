@@ -33,6 +33,7 @@ import org.apache.gravitino.exceptions.NoSuchTagException;
 import org.apache.gravitino.rest.RESTUtils;
 import org.apache.gravitino.tag.SupportsTags;
 import org.apache.gravitino.tag.Tag;
+import org.apache.gravitino.tag.TagValue;
 
 /**
  * The implementation of {@link SupportsTags}. This interface will be composited into catalog,
@@ -104,6 +105,11 @@ class MetadataObjectTagOperations implements SupportsTags {
 
   @Override
   public String[] associateTags(String[] tagsToAdd, String[] tagsToRemove) {
+    return associateTags(toValuelessTagValues(tagsToAdd), toValuelessTagValues(tagsToRemove));
+  }
+
+  @Override
+  public String[] associateTags(TagValue[] tagsToAdd, TagValue[] tagsToRemove) {
     TagsAssociateRequest request = new TagsAssociateRequest(tagsToAdd, tagsToRemove);
     request.validate();
 
@@ -117,5 +123,13 @@ class MetadataObjectTagOperations implements SupportsTags {
 
     resp.validate();
     return resp.getNames();
+  }
+
+  private static TagValue[] toValuelessTagValues(String[] tags) {
+    if (tags == null) {
+      return null;
+    }
+
+    return Arrays.stream(tags).map(TagValue::noValue).toArray(TagValue[]::new);
   }
 }

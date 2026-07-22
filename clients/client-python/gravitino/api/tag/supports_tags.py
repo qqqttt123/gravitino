@@ -20,6 +20,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 from gravitino.api.tag.tag import Tag
+from gravitino.api.tag.tag_value import TagValue
 
 
 class SupportsTags(ABC):
@@ -63,7 +64,9 @@ class SupportsTags(ABC):
 
     @abstractmethod
     def associate_tags(
-        self, tags_to_add: list[str], tags_to_remove: list[str]
+        self,
+        tags_to_add: list[str | TagValue],
+        tags_to_remove: list[str | TagValue],
     ) -> list[str]:
         """Associate tags to the specific object.
 
@@ -75,8 +78,8 @@ class SupportsTags(ABC):
         3. If the tag is already associated with the object, it will raise `TagAlreadyAssociatedException`.
 
         Args:
-            tags_to_add (list[str]): The arrays of tag name to be added to the object.
-            tags_to_remove (list[str]): The array of tag name to be removed from the object.
+            tags_to_add: The tag names or tag values to be added to the object.
+            tags_to_remove: The tag names or tag values to be removed from the object.
 
         Raises:
             TagAlreadyAssociatedException: If the tag is already associated with the object.

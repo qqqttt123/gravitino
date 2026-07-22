@@ -17,9 +17,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Optional
 
 from dataclasses_json import config, dataclass_json
 
+from gravitino.api.tag.tag_value import TagValue
 from gravitino.rest.rest_message import RESTRequest
 from gravitino.utils.precondition import Precondition
 from gravitino.utils.string_utils import StringUtils
@@ -32,18 +34,26 @@ class TagsAssociateRequest(RESTRequest):
     Represents a request to associate tags.
     """
 
-    _tags_to_add: list[str] = field(metadata=config(field_name="tagsToAdd"))
-    _tags_to_remove: list[str] = field(metadata=config(field_name="tagsToRemove"))
+    _tags_to_add: Optional[list[TagValue]] = field(
+        default=None, metadata=config(field_name="tagsToAdd")
+    )
+    _tags_to_remove: Optional[list[TagValue]] = field(
+        default=None, metadata=config(field_name="tagsToRemove")
+    )
+
+    def __post_init__(self) -> None:
+        self._tags_to_add = self._to_tag_values(self._tags_to_add)
+        self._tags_to_remove = self._to_tag_values(self._tags_to_remove)
 
     @property
-    def tags_to_add(self) -> list[str]:
+    def tags_to_add(self) -> Optional[list[TagValue]]:
         """
         Gets the tags to add.
         """
         return self._tags_to_add
 
     @property
-    def tags_to_remove(self) -> list[str]:
+    def tags_to_remove(self) -> Optional[list[TagValue]]:
         """
         Gets the tags to remove.
         """
@@ -61,11 +71,30 @@ class TagsAssociateRequest(RESTRequest):
         self._validate_tags(self._tags_to_add, "tagsToAdd")
         self._validate_tags(self._tags_to_remove, "tagsToRemove")
 
-    def _validate_tags(self, tags: list[str] | None, field_name: str) -> None:
+    def _validate_tags(self, tags: Optional[list[TagValue]], field_name: str) -> None:
         if tags is None:
             return
 
         Precondition.check_argument(
-            all(StringUtils.is_not_blank(tag) for tag in tags),
+            all(
+                tag_value is not None and StringUtils.is_not_blank(tag_value.name)
+                for tag_value in tags
+            ),
             f"{field_name} must not contain null or empty tag names",
         )
+        Precondition.check_argument(
+            all(
+                tag_value.value is None or StringUtils.is_not_blank(tag_value.value)
+                for tag_value in tags
+            ),
+            f"{field_name} must not contain empty tag values",
+        )
+
+    @staticmethod
+    def _to_tag_values(tags):
+        if tags is None:
+            return None
+
+        return [
+            tag if isinstance(tag, TagValue) else TagValue.no_value(tag) for tag in tags
+        ]

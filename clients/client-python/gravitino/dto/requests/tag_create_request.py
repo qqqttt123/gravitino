@@ -23,6 +23,7 @@ from dataclasses_json import config, dataclass_json
 
 from gravitino.rest.rest_message import RESTRequest
 from gravitino.utils.precondition import Precondition
+from gravitino.utils.string_utils import StringUtils
 
 
 @dataclass_json
@@ -35,6 +36,9 @@ class TagCreateRequest(RESTRequest):
     _properties: Optional[dict[str, str]] = field(
         default_factory=dict, metadata=config(field_name="properties")
     )
+    _allowed_values: Optional[list[str]] = field(
+        default=None, metadata=config(field_name="allowedValues")
+    )
 
     def validate(self) -> None:
         """
@@ -44,3 +48,12 @@ class TagCreateRequest(RESTRequest):
         Precondition.check_string_not_empty(
             self._name, "name is required and cannot be empty"
         )
+        if self._allowed_values is not None:
+            Precondition.check_argument(
+                all(StringUtils.is_not_blank(value) for value in self._allowed_values),
+                "allowedValues cannot contain null or empty values",
+            )
+            Precondition.check_argument(
+                all(len(value) <= 256 for value in self._allowed_values),
+                "allowedValues cannot contain values longer than 256 characters",
+            )

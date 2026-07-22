@@ -287,7 +287,7 @@ class GravitinoClient(GravitinoClientBase, SupportsJobs, TagOperations):
         """
         return self.get_metalake().get_tag(tag_name)
 
-    def create_tag(self, tag_name, comment, properties) -> Tag:
+    def create_tag(self, tag_name, comment, properties, allowed_values=None) -> Tag:
         """
         Create a new tag under a metalake.
 
@@ -303,7 +303,11 @@ class GravitinoClient(GravitinoClientBase, SupportsJobs, TagOperations):
         Returns:
             Tag: The tag information.
         """
-        return self.get_metalake().create_tag(tag_name, comment, properties)
+        if allowed_values is None:
+            return self.get_metalake().create_tag(tag_name, comment, properties)
+        return self.get_metalake().create_tag(
+            tag_name, comment, properties, allowed_values
+        )
 
     def alter_tag(self, tag_name, *changes) -> Tag:
         """

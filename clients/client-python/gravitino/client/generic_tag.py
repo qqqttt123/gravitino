@@ -80,6 +80,14 @@ class GenericTag(Tag, Tag.AssociatedObjects):
         """
         return self._tag_dto.properties()
 
+    def allowed_values(self) -> Optional[list[str]]:
+        """Get the allowed assignment values of the tag."""
+        return self._tag_dto.allowed_values()
+
+    def assignment_values(self) -> Optional[list[str]]:
+        """Get assignment values in the current metadata-object context."""
+        return self._tag_dto.assignment_values()
+
     def inherited(self) -> Optional[bool]:
         """Check if the tag is inherited from a parent object or not.
 
@@ -113,7 +121,7 @@ class GenericTag(Tag, Tag.AssociatedObjects):
         """
         return self
 
-    def objects(self) -> list[MetadataObject]:
+    def objects(self, value: Optional[str] = None) -> list[MetadataObject]:
         """
         Retrieve the list of objects that are associated with this tag.
 
@@ -125,7 +133,8 @@ class GenericTag(Tag, Tag.AssociatedObjects):
             encode_string(self.name()),
         )
 
-        response = self.get_response(url, TAG_ERROR_HANDLER)
+        params = {} if value is None else {"value": value}
+        response = self.get_response(url, TAG_ERROR_HANDLER, params)
         objects_resp = MetadataObjectListResponse.from_json(
             response.body, infer_missing=True
         )
@@ -133,7 +142,12 @@ class GenericTag(Tag, Tag.AssociatedObjects):
 
         return objects_resp.metadata_objects()
 
-    def get_response(self, url: str, error_handler: ErrorHandler) -> Response:
+    def get_response(
+        self,
+        url: str,
+        error_handler: ErrorHandler,
+        params: Optional[dict[str, str]] = None,
+    ) -> Response:
         """
         Get the response from the server, for testing convenience.
 
@@ -146,5 +160,6 @@ class GenericTag(Tag, Tag.AssociatedObjects):
         """
         return self._client.get(
             url,
+            params={} if params is None else params,
             error_handler=error_handler,
         )

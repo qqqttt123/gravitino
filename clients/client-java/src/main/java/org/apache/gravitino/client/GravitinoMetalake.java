@@ -131,6 +131,7 @@ import org.apache.gravitino.rest.RESTUtils;
 import org.apache.gravitino.tag.Tag;
 import org.apache.gravitino.tag.TagChange;
 import org.apache.gravitino.tag.TagOperations;
+import org.apache.gravitino.tag.TagValueConstraint;
 
 /**
  * Apache Gravitino Metalake is the top-level metadata repository for users. It contains a list of
@@ -510,8 +511,29 @@ public class GravitinoMetalake extends MetalakeDTO
   @Override
   public Tag createTag(String name, String comment, Map<String, String> properties)
       throws TagAlreadyExistsException {
+    return createTag(name, comment, properties, TagValueConstraint.anyValue());
+  }
+
+  /**
+   * Create a tag under the current metalake.
+   *
+   * @param name The name of the tag.
+   * @param comment The comment of the tag.
+   * @param properties The properties of the tag.
+   * @param valueConstraint The assignment value constraint of the tag.
+   * @return The created tag.
+   * @throws TagAlreadyExistsException If the tag already exists.
+   */
+  @Override
+  public Tag createTag(
+      String name,
+      String comment,
+      Map<String, String> properties,
+      TagValueConstraint valueConstraint)
+      throws TagAlreadyExistsException {
     Preconditions.checkArgument(StringUtils.isNotBlank(name), "tag name must not be null or empty");
-    TagCreateRequest req = new TagCreateRequest(name, comment, properties);
+    TagCreateRequest req =
+        new TagCreateRequest(name, comment, properties, allowedValuesForRequest(valueConstraint));
     req.validate();
 
     TagResponse resp =
@@ -1701,5 +1723,19 @@ public class GravitinoMetalake extends MetalakeDTO
     }
 
     ErrorHandlers.policyErrorHandler().accept(resp);
+  }
+
+  private static String[] allowedValuesForRequest(TagValueConstraint valueConstraint) {
+    TagValueConstraint constraint =
+        valueConstraint == null ? TagValueConstraint.anyValue() : valueConstraint;
+    switch (constraint.type()) {
+      case ANY_VALUE:
+        return null;
+      case NO_VALUE:
+      case ALLOWED_VALUES:
+        return constraint.allowedValues();
+      default:
+        throw new IllegalArgumentException("Unknown tag value constraint: " + constraint);
+    }
   }
 }

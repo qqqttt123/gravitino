@@ -35,6 +35,8 @@ class TestTagDTO(unittest.TestCase):
                     "key2": "value2",
                 }
             )
+            .allowed_values(["finance", "risk"])
+            .assignment_values(["finance"])
             .audit_info(AuditDTO("test_user", 1640995200000))
             .inherited(True)
             .build()
@@ -45,6 +47,10 @@ class TestTagDTO(unittest.TestCase):
         self.assertEqual(deser_dict["comment"], "test_comment")
         self.assertEqual(deser_dict["properties"], {"key1": "value1", "key2": "value2"})
         self.assertTrue(deser_dict["inherited"])
+        self.assertEqual(deser_dict["allowedValues"], ["finance", "risk"])
+        self.assertEqual(deser_dict["assignmentValues"], ["finance"])
+        self.assertEqual(tag_dto.allowed_values(), ["finance", "risk"])
+        self.assertEqual(tag_dto.assignment_values(), ["finance"])
         self.assertEqual(deser_dict["audit"]["creator"], "test_user")
         self.assertEqual(deser_dict["audit"]["createTime"], 1640995200000)
 

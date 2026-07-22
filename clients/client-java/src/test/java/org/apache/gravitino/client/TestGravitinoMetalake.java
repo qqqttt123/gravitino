@@ -74,6 +74,7 @@ import org.apache.gravitino.policy.PolicyChange;
 import org.apache.gravitino.policy.PolicyContents;
 import org.apache.gravitino.tag.Tag;
 import org.apache.gravitino.tag.TagChange;
+import org.apache.gravitino.tag.TagValueConstraint;
 import org.apache.hc.core5.http.HttpStatus;
 import org.apache.hc.core5.http.Method;
 import org.junit.jupiter.api.AfterAll;
@@ -578,6 +579,42 @@ public class TestGravitinoMetalake extends TestBase {
     Assertions.assertEquals(tagName, tag.name());
     Assertions.assertNull(tag.comment());
     Assertions.assertNull(tag.properties());
+
+    String[] allowedValues = new String[] {"finance", "risk"};
+    TagDTO tagWithAllowedValues =
+        TagDTO.builder()
+            .withName(tagName)
+            .withAllowedValues(allowedValues)
+            .withAudit(
+                AuditDTO.builder().withCreator("creator").withCreateTime(Instant.now()).build())
+            .build();
+    TagCreateRequest allowedValuesReq = new TagCreateRequest(tagName, null, null, allowedValues);
+    buildMockResource(
+        Method.POST,
+        path,
+        allowedValuesReq,
+        new TagResponse(tagWithAllowedValues),
+        HttpStatus.SC_OK);
+
+    Tag tagWithValues =
+        gravitinoClient.createTag(
+            tagName, null, null, TagValueConstraint.ofAllowedValues(allowedValues));
+    Assertions.assertArrayEquals(allowedValues, tagWithValues.valueConstraint().allowedValues());
+    TagDTO tagWithoutAllowedValues =
+        TagDTO.builder()
+            .withName(tagName)
+            .withAllowedValues(new String[0])
+            .withAudit(
+                AuditDTO.builder().withCreator("creator").withCreateTime(Instant.now()).build())
+            .build();
+    TagCreateRequest noValueReq = new TagCreateRequest(tagName, null, null, new String[0]);
+    buildMockResource(
+        Method.POST, path, noValueReq, new TagResponse(tagWithoutAllowedValues), HttpStatus.SC_OK);
+
+    Tag tagWithNoValueConstraint =
+        gravitinoClient.createTag(tagName, null, null, TagValueConstraint.noValue());
+    Assertions.assertEquals(
+        TagValueConstraint.noValue(), tagWithNoValueConstraint.valueConstraint());
 
     // Test with null name
     Throwable ex =

@@ -19,6 +19,7 @@ from __future__ import annotations
 import json as _json
 import unittest
 
+from gravitino.api.tag.tag_value import TagValue
 from gravitino.dto.requests.tag_associate_request import TagsAssociateRequest
 from gravitino.exceptions.base import IllegalArgumentException
 
@@ -26,12 +27,19 @@ from gravitino.exceptions.base import IllegalArgumentException
 class TestTagsAssociateRequest(unittest.TestCase):
     def test_create_request(self) -> None:
         request = TagsAssociateRequest(
-            ["tag_to_add_1", "tag_to_add_2"], ["tag_to_remove_1", "tag_to_remove_2"]
+            [
+                TagValue.no_value("tag_to_add_1"),
+                TagValue.of("tag_to_add_2", "finance"),
+            ],
+            [TagValue.of("tag_to_remove_1", "risk")],
         )
         json_str = _json.dumps(
             {
-                "tagsToAdd": ["tag_to_add_1", "tag_to_add_2"],
-                "tagsToRemove": ["tag_to_remove_1", "tag_to_remove_2"],
+                "tagsToAdd": [
+                    {"name": "tag_to_add_1", "value": None},
+                    {"name": "tag_to_add_2", "value": "finance"},
+                ],
+                "tagsToRemove": [{"name": "tag_to_remove_1", "value": "risk"}],
             }
         )
 
@@ -39,12 +47,12 @@ class TestTagsAssociateRequest(unittest.TestCase):
         deserialized_request = TagsAssociateRequest.from_json(json_str)
 
         self.assertTrue(isinstance(deserialized_request, TagsAssociateRequest))
-        self.assertEqual(
-            ["tag_to_add_1", "tag_to_add_2"], deserialized_request.tags_to_add
-        )
-        self.assertEqual(
-            ["tag_to_remove_1", "tag_to_remove_2"], deserialized_request.tags_to_remove
-        )
+        self.assertEqual("tag_to_add_1", deserialized_request.tags_to_add[0].name)
+        self.assertIsNone(deserialized_request.tags_to_add[0].value)
+        self.assertEqual("tag_to_add_2", deserialized_request.tags_to_add[1].name)
+        self.assertEqual("finance", deserialized_request.tags_to_add[1].value)
+        self.assertEqual("tag_to_remove_1", deserialized_request.tags_to_remove[0].name)
+        self.assertEqual("risk", deserialized_request.tags_to_remove[0].value)
 
     def test_associate_request_validate(self) -> None:
         invalid_request1 = TagsAssociateRequest(
@@ -53,9 +61,15 @@ class TestTagsAssociateRequest(unittest.TestCase):
         invalid_request2 = TagsAssociateRequest(
             ["tag_to_add_1", " "], ["tag_to_remove_1", "tag_to_remove_2"]
         )
+        invalid_request3 = TagsAssociateRequest(
+            [TagValue.of("tag_to_add_1", " ")], None
+        )
 
         with self.assertRaises(IllegalArgumentException):
             invalid_request1.validate()
 
         with self.assertRaises(IllegalArgumentException):
             invalid_request2.validate()
+
+        with self.assertRaises(IllegalArgumentException):
+            invalid_request3.validate()

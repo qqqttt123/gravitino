@@ -216,7 +216,7 @@ class TestGenericTagEntity(GenericTag):
         self.__dump_object = dump_object
         self.__throw_error = throw_error
 
-    def get_response(self, url, _=None) -> Response[MagicMock]:
+    def get_response(self, url, _=None, params=None) -> Response[MagicMock]:
         if self.__throw_error is not None:
             raise self.__throw_error(f"Raise {self.__throw_error.__name__} Error")
 

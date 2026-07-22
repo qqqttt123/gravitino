@@ -61,6 +61,7 @@ import org.apache.gravitino.rel.View;
 import org.apache.gravitino.rel.types.Types;
 import org.apache.gravitino.tag.SupportsTags;
 import org.apache.gravitino.tag.Tag;
+import org.apache.gravitino.tag.TagValue;
 import org.apache.hc.core5.http.Method;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
@@ -639,6 +640,15 @@ public class TestSupportTags extends TestBase {
 
     String[] actualTags = supportsTags.associateTags(tagsToAdd, tagsToRemove);
     Assertions.assertArrayEquals(tagsToAdd, actualTags);
+
+    TagValue[] tagValuesToAdd =
+        new TagValue[] {TagValue.of("tag1", "finance"), TagValue.of("tag1", "risk")};
+    TagValue[] tagValuesToRemove = new TagValue[] {TagValue.of("tag1", "old")};
+    TagsAssociateRequest valueRequest = new TagsAssociateRequest(tagValuesToAdd, tagValuesToRemove);
+    buildMockResource(Method.POST, path, valueRequest, resp, SC_OK);
+
+    String[] actualValueTags = supportsTags.associateTags(tagValuesToAdd, tagValuesToRemove);
+    Assertions.assertArrayEquals(tagsToAdd, actualValueTags);
 
     // Test throw internal error
     ErrorResponse errorResp1 = ErrorResponse.internalError("mock error");

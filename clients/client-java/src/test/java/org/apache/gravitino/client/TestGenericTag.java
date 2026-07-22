@@ -19,6 +19,7 @@
 package org.apache.gravitino.client;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.google.common.collect.ImmutableMap;
 import java.time.Instant;
 import java.util.Collections;
 import org.apache.gravitino.MetadataObject;
@@ -47,6 +48,8 @@ public class TestGenericTag extends TestBase {
           .withName("tag1")
           .withComment("comment1")
           .withProperties(Collections.emptyMap())
+          .withAllowedValues(new String[] {"finance", "risk"})
+          .withAssignmentValues(new String[] {"finance"})
           .withAudit(AuditDTO.builder().withCreator("test").withCreateTime(Instant.now()).build())
           .build();
 
@@ -82,6 +85,9 @@ public class TestGenericTag extends TestBase {
   @Test
   public void testAssociatedObjects() throws JsonProcessingException {
     Tag tag = new GenericTag(tagDTO, gravitinoClient.restClient(), metalakeName);
+    Assertions.assertArrayEquals(
+        new String[] {"finance", "risk"}, tag.valueConstraint().allowedValues());
+    Assertions.assertArrayEquals(new String[] {"finance"}, tag.assignment().get().values());
     String path = "/api/metalakes/" + metalakeName + "/tags/" + tagDTO.name() + "/objects";
 
     MetadataObjectDTO[] objects =
@@ -120,6 +126,11 @@ public class TestGenericTag extends TestBase {
       Assertions.assertEquals(object.name(), actualObject.name());
       Assertions.assertEquals(object.type(), actualObject.type());
     }
+
+    buildMockResource(
+        Method.GET, path, ImmutableMap.of("value", "finance"), null, resp, HttpStatus.SC_OK);
+    MetadataObject[] valueObjects = tag.associatedObjects().objects("finance");
+    Assertions.assertEquals(objects.length, valueObjects.length);
 
     // Test return empty array
     buildMockResource(

@@ -90,6 +90,25 @@ class Tag(Auditable):
         raise NotImplementedError()
 
     @abstractmethod
+    def allowed_values(self) -> Optional[list[str]]:
+        """Get the allowed assignment values of the tag.
+
+        Returns:
+            Optional[list[str]]: None means unrestricted. An empty list means only assignments with no value.
+        """
+        raise NotImplementedError()
+
+    @abstractmethod
+    def assignment_values(self) -> Optional[list[str]]:
+        """Get assignment values in the current metadata-object context.
+
+        Returns:
+            Optional[list[str]]: The assignment values, an empty list for an
+            assignment with no value, or None without context.
+        """
+        raise NotImplementedError()
+
+    @abstractmethod
     def inherited(self) -> Optional[bool]:
         """Check if the tag is inherited from a parent object or not.
 
@@ -131,9 +150,12 @@ class Tag(Auditable):
             return 0 if (s := self.objects()) is None else len(s)
 
         @abstractmethod
-        def objects(self) -> list[MetadataObject]:
+        def objects(self, value: Optional[str] = None) -> list[MetadataObject]:
             """
             Retrieve the list of objects that are associated with this tag.
+
+            Args:
+                value: The exact assignment value to filter by.
 
             Raises:
                 NotImplementedError: if the method is not implemented.

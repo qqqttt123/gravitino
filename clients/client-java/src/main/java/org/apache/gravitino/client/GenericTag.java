@@ -18,6 +18,7 @@
  */
 package org.apache.gravitino.client;
 
+import com.google.common.collect.ImmutableMap;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Optional;
@@ -27,6 +28,8 @@ import org.apache.gravitino.dto.responses.MetadataObjectListResponse;
 import org.apache.gravitino.dto.tag.TagDTO;
 import org.apache.gravitino.rest.RESTUtils;
 import org.apache.gravitino.tag.Tag;
+import org.apache.gravitino.tag.TagAssignment;
+import org.apache.gravitino.tag.TagValueConstraint;
 
 /** Represents a generic tag. */
 class GenericTag implements Tag, Tag.AssociatedObjects {
@@ -59,6 +62,16 @@ class GenericTag implements Tag, Tag.AssociatedObjects {
   }
 
   @Override
+  public TagValueConstraint valueConstraint() {
+    return tagDTO.valueConstraint();
+  }
+
+  @Override
+  public Optional<TagAssignment> assignment() {
+    return tagDTO.assignment();
+  }
+
+  @Override
   public Optional<Boolean> inherited() {
     return tagDTO.inherited();
   }
@@ -75,11 +88,17 @@ class GenericTag implements Tag, Tag.AssociatedObjects {
 
   @Override
   public MetadataObject[] objects() {
+    return objects(null);
+  }
+
+  @Override
+  public MetadataObject[] objects(String value) {
     MetadataObjectListResponse resp =
         restClient.get(
             String.format(
                 "api/metalakes/%s/tags/%s/objects",
                 RESTUtils.encodeString(metalake), RESTUtils.encodeString(name())),
+            value == null ? Collections.emptyMap() : ImmutableMap.of("value", value),
             MetadataObjectListResponse.class,
             Collections.emptyMap(),
             ErrorHandlers.tagErrorHandler());

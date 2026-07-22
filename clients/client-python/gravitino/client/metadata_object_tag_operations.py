@@ -20,6 +20,7 @@ from __future__ import annotations
 from gravitino.api.metadata_object import MetadataObject
 from gravitino.api.tag.supports_tags import SupportsTags
 from gravitino.api.tag.tag import Tag
+from gravitino.api.tag.tag_value import TagValue
 from gravitino.client.generic_tag import GenericTag
 from gravitino.dto.requests.tag_associate_request import TagsAssociateRequest
 from gravitino.dto.responses.tag_response import (
@@ -112,7 +113,9 @@ class MetadataObjectTagOperations(SupportsTags):
         )
 
     def associate_tags(
-        self, tags_to_add: list[str], tags_to_remove: list[str]
+        self,
+        tags_to_add: list[str | TagValue],
+        tags_to_remove: list[str | TagValue],
     ) -> list[str]:
         associate_request = TagsAssociateRequest(tags_to_add, tags_to_remove)
         associate_request.validate()
